@@ -107,14 +107,41 @@
             padding: 6px 20px;
             border-radius: 4px;
         }
+        
+        #board-wrapper {
+            position: relative;
+            width: 520px;
+            height: 520px;
+        }
+
         #chessboard {
             display: grid;
             grid-template-columns: repeat(8, 65px);
             grid-template-rows: repeat(8, 65px);
             border: 5px solid #34495e;
             box-shadow: 0 12px 28px rgba(0,0,0,0.4);
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            transition: transform 0.5s ease;
         }
+        
+        /* Flips board wrapper 180 degrees if player is Black */
+        .flipped-board {
+            transform: rotate(180deg);
+        }
+
+        #arrow-svg {
+            position: absolute;
+            top: 5px; /* Offset the 5px chess board border */
+            left: 5px;
+            width: 520px;
+            height: 520px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         .cell {
             width: 65px;
             height: 65px;
@@ -152,9 +179,14 @@
             cursor: grab;
             position: relative;
             transform: translate(0, 0);
-            transition: none; /* Controlled dynamically via Javascript during movement */
+            transition: none;
         }
         .piece:active { cursor: grabbing; }
+        
+        /* Auto-corrects piece rotation if the board container is flipped */
+        .flipped-board .piece {
+            transform: rotate(180deg);
+        }
         
         .piece-w { color: #ffffff; filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.75)); }
         .piece-b { color: #111111; filter: drop-shadow(0px 2px 2px rgba(255,255,255,0.2)); }
@@ -216,10 +248,8 @@
         }
     </style>
 </head>
-<body>
-
-    <h1>Take King Chess (Online Multiplayer)</h1>
-    <p>Move into danger freely. Match a stranger on your selected variant level or input your friend's room ID manually.</p>
+<body oncontextmenu="return false;"> <h1>Take King Chess (Online Multiplayer)</h1>
+    <p>Move into danger freely. Match a stranger or input your friend's room ID. Right-click and drag to create strategic layout arrows.</p>
     
     <div id="lobby-panel">
         <div class="lobby-row">
@@ -243,9 +273,18 @@
     </div>
 
     <div id="status">Awaiting Network Connection...</div>
-    <div id="chessboard"></div>
+    
+    <div id="board-wrapper">
+        <div id="chessboard"></div>
+        <svg id="arrow-svg" viewBox="0 0 520 520">
+            <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="rgba(230, 126, 34, 0.85)" />
+                </marker>
+            </defs>
+        </svg>
+    </div>
 
-    <!-- Replay System Markup -->
     <div id="replay-panel">
         <div id="replay-counter">Reviewing Move: 0 / 0</div>
         <div class="replay-buttons">
@@ -268,6 +307,7 @@
         const connectBtn = document.getElementById('connect-btn');
         const randomMatchBtn = document.getElementById('random-match-btn');
         const networkLog = document.getElementById('network-log');
+        const arrowSvg = document.getElementById('arrow-svg');
 
         // Replay DOM Elements
         const replayPanel = document.getElementById('replay-panel');
@@ -309,7 +349,11 @@
         let turn = 'w'; 
         let selected = null; 
         let gameOver = false;
-        let isAnimating = false; // Flag to block conflicting inputs during a slide
+        let isAnimating = false; 
+
+        // Arrow drawing vector database
+        let activeArrows = [];
+        let drawingStartCell = null;
 
         // Replay Engine State Database
         let gameHistory = [];
@@ -459,6 +503,13 @@
                 cleanupMatchmaking();
                 disableLevelSelection();
                 
+                // Trigger Board Flip if user color is black
+                if (myPlayerColor === 'b') {
+                    boardElem.classList.add('flipped-board');
+                } else {
+                    boardElem.classList.remove('flipped-board');
+                }
+
                 if (myPlayerColor === 'w') {
                     sendDataPayload({ type: 'RULE_SYNC', level: currentLevel });
                 }
@@ -513,6 +564,8 @@
             gameOver = false;
             isReplaying = false;
             isAnimating = false;
+            activeArrows = [];
+            redrawArrows();
             gameHistory = [];
             replayPanel.style.display = 'none';
             itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
@@ -540,7 +593,7 @@
                 return;
             }
             let turnTxt = (turn === 'w') ? "White's Turn" : "Black's Turn";
-            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...);";
+            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...)";
             statusElem.textContent = turnTxt + identityTxt;
             statusElem.style.color = "#2ecc71";
         }
@@ -558,7 +611,10 @@
 
                     cell.addEventListener('dragover', onDragOver);
                     cell.addEventListener('drop', onDrop);
-                    cell.addEventListener('click', onSquareClick);
+                    
+                    // Wire up pointer systems to capture mouse inputs for click-selection and right-click tracking
+                    cell.addEventListener('mousedown', onSquareMouseDown);
+                    cell.addEventListener('mouseup', onSquareMouseUp);
 
                     const pieceType = board[r][c];
                     if (pieceType) {
@@ -615,26 +671,94 @@
             attemptMove(parseInt(cell.dataset.row), parseInt(cell.dataset.col));
         }
 
-        function onSquareClick(e) {
-            if (gameOver || isReplaying || isAnimating || !myPlayerColor || turn !== myPlayerColor) return;
+        /* Mouse Event Core Interceptors (Handles left-clicks and right-click strategic layout vectors) */
+        function onSquareMouseDown(e) {
             const cell = e.currentTarget;
             const r = parseInt(cell.dataset.row);
             const c = parseInt(cell.dataset.col);
 
-            if (selected) {
-                if (attemptMove(r, c)) return;
+            if (e.button === 2) { // Right Click
+                drawingStartCell = { r, c };
+            } else if (e.button === 0) { // Left Click
+                // Clear active board layout annotations on left click
+                if (activeArrows.length > 0) {
+                    activeArrows = [];
+                    redrawArrows();
+                }
+
+                if (gameOver || isReplaying || isAnimating || !myPlayerColor || turn !== myPlayerColor) return;
+
+                if (selected) {
+                    if (attemptMove(r, c)) return;
+                }
+                
+                const piece = board[r][c];
+                const isWhitePiece = piece && piece === piece.toUpperCase();
+                const matchedColorOwnership = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
+                
+                if (piece && matchedColorOwnership && ((turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece)) && itemSlippedState[r][c] === null) {
+                    selectPiece(r, c);
+                } else {
+                    selected = null;
+                    clearHighlights();
+                }
             }
-            
-            const piece = board[r][c];
-            const isWhitePiece = piece && piece === piece.toUpperCase();
-            const matchedColorOwnership = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
-            
-            if (piece && matchedColorOwnership && ((turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece)) && itemSlippedState[r][c] === null) {
-                selectPiece(r, c);
-            } else {
-                selected = null;
-                clearHighlights();
+        }
+
+        function onSquareMouseUp(e) {
+            if (e.button === 2 && drawingStartCell) { // Right Click release
+                const cell = e.currentTarget;
+                const r = parseInt(cell.dataset.row);
+                const c = parseInt(cell.dataset.col);
+
+                if (drawingStartCell.r !== r || drawingStartCell.c !== c) {
+                    const arrowEntry = { fromR: drawingStartCell.r, fromC: drawingStartCell.c, toR: r, toC: c };
+                    
+                    // Toggle arrow off if identical duplicate path is drawn over again
+                    const duplicateIndex = activeArrows.findIndex(a => a.fromR === arrowEntry.fromR && a.fromC === arrowEntry.fromC && a.toR === arrowEntry.toR && a.toC === arrowEntry.toC);
+                    if (duplicateIndex !== -1) {
+                        activeArrows.splice(duplicateIndex, 1);
+                    } else {
+                        activeArrows.push(arrowEntry);
+                    }
+                    redrawArrows();
+                }
+                drawingStartCell = null;
             }
+        }
+
+        /* Responsive SVG Arrow Grid Vector Redraw Pipeline */
+        function redrawArrows() {
+            // Flush all old layout arrows except the defs template node
+            const elements = arrowSvg.querySelectorAll('line');
+            elements.forEach(el => el.remove());
+
+            activeArrows.forEach(arrow => {
+                // Determine layout coordinates relative to standard 65px cells
+                let x1 = arrow.fromC * 65 + 32.5;
+                let y1 = arrow.fromR * 65 + 32.5;
+                let x2 = arrow.toC * 65 + 32.5;
+                let y2 = arrow.toR * 65 + 32.5;
+
+                // Adjust vectors if client board flip is currently active for Black
+                if (myPlayerColor === 'b') {
+                    x1 = 520 - x1;
+                    y1 = 520 - y1;
+                    x2 = 520 - x2;
+                    y2 = 520 - y2;
+                }
+
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', x1);
+                line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2);
+                line.setAttribute('y2', y2);
+                line.setAttribute('stroke', 'rgba(230, 126, 34, 0.85)');
+                line.setAttribute('stroke-width', '5');
+                line.setAttribute('marker-end', 'url(#arrowhead)');
+                
+                arrowSvg.appendChild(line);
+            });
         }
 
         function selectPiece(r, c) {
@@ -661,47 +785,62 @@
             return false;
         }
 
-        /* Slide Animation and Execution Pipeline Wrapper */
+        /* Dynamic Visual Slide Logic (Factoring Board Inversions) */
         function animateAndExecuteMove(move) {
             isAnimating = true;
             selected = null;
             clearHighlights();
+
+            // Clear visual arrows upon any board piece layout alterations
+            activeArrows = [];
+            redrawArrows();
 
             const fromCell = document.querySelector(`[data-row="${move.fromR}"][data-col="${move.fromC}"]`);
             const toCell = document.querySelector(`[data-row="${move.toR}"][data-col="${move.toC}"]`);
             const movingPieceElem = fromCell ? fromCell.querySelector('.piece') : null;
 
             if (movingPieceElem && fromCell && toCell) {
-                // Calculate precise sliding vector based on client bounding rect layouts
                 const fromRect = fromCell.getBoundingClientRect();
                 const toRect = toCell.getBoundingClientRect();
-                const deltaX = toRect.left - fromRect.left;
-                const deltaY = toRect.top - fromRect.top;
+                
+                // Track standard delta movement shifts
+                let deltaX = toRect.left - fromRect.left;
+                let deltaY = toRect.top - fromRect.top;
 
-                // Configure CSS transition runtime metrics
+                // Absolute invert structural vectors if client matches flipped black criteria
+                if (myPlayerColor === 'b') {
+                    deltaX = -deltaX;
+                    deltaY = -deltaY;
+                }
+
                 movingPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
                 
-                // If it's a Swap operation, smoothly cross-animate the secondary piece too
                 let targetPieceElem = toCell.querySelector('.piece');
                 if (move.type === 'swap' && targetPieceElem) {
                     targetPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
-                    targetPieceElem.style.transform = `translate(${-deltaX}px, ${-deltaY}px)`;
+                    // Cross swap target piece inversion configuration
+                    if (myPlayerColor === 'b') {
+                        targetPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
+                    } else {
+                        targetPieceElem.style.transform = `translate(${-deltaX}px, ${-deltaY}px)`;
+                    }
                 } else if (targetPieceElem) {
-                    // Normal capture: fade target piece out cleanly during transit
                     targetPieceElem.style.transition = "opacity 0.2s ease";
                     targetPieceElem.style.opacity = "0";
                 }
 
-                // Fire the translation layer
-                movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                // Append rotation lock variables if flipped state rules apply to the item element
+                if (myPlayerColor === 'b') {
+                    movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
+                } else {
+                    movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                }
 
-                // Wait for the transition layout calculation step to conclude
                 movingPieceElem.addEventListener('transitionend', function handler() {
                     movingPieceElem.removeEventListener('transitionend', handler);
                     finalizeMoveState(move);
                 });
             } else {
-                // Fallback protection if DOM structural assets are missing
                 finalizeMoveState(move);
             }
         }
