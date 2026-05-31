@@ -148,8 +148,11 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 3;
+            z-index: 10;
             cursor: grab;
+            position: relative;
+            transform: translate(0, 0);
+            transition: none; /* Controlled dynamically via Javascript during movement */
         }
         .piece:active { cursor: grabbing; }
         
@@ -166,6 +169,50 @@
             position: absolute;
             z-index: 2;
             pointer-events: none;
+        }
+
+        /* Replay Engine UI Controls */
+        #replay-panel {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            background-color: #34495e;
+            border: 2px dashed #f1c40f;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            width: 480px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+        }
+        .replay-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .replay-btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            background-color: #2c3e50;
+            color: #f1c40f;
+            border: 1px solid #f1c40f;
+        }
+        .replay-btn:hover:not(:disabled) {
+            background-color: #f1c40f;
+            color: #2c3e50;
+        }
+        .replay-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: #7f8c8d;
+            color: #7f8c8d;
+        }
+        #replay-counter {
+            font-size: 1rem;
+            font-weight: bold;
+            color: #ecf0f1;
         }
     </style>
 </head>
@@ -198,6 +245,17 @@
     <div id="status">Awaiting Network Connection...</div>
     <div id="chessboard"></div>
 
+    <!-- Replay System Markup -->
+    <div id="replay-panel">
+        <div id="replay-counter">Reviewing Move: 0 / 0</div>
+        <div class="replay-buttons">
+            <button class="replay-btn" id="btn-first">Local Replay First</button>
+            <button class="replay-btn" id="btn-prev">◀ Back</button>
+            <button class="replay-btn" id="btn-next">Next ▶</button>
+            <button class="replay-btn" id="btn-last">Last ⏭</button>
+        </div>
+    </div>
+
     <script>
         const boardElem = document.getElementById('chessboard');
         const statusElem = document.getElementById('status');
@@ -210,6 +268,14 @@
         const connectBtn = document.getElementById('connect-btn');
         const randomMatchBtn = document.getElementById('random-match-btn');
         const networkLog = document.getElementById('network-log');
+
+        // Replay DOM Elements
+        const replayPanel = document.getElementById('replay-panel');
+        const replayCounter = document.getElementById('replay-counter');
+        const btnFirst = document.getElementById('btn-first');
+        const btnPrev = document.getElementById('btn-prev');
+        const btnNext = document.getElementById('btn-next');
+        const btnLast = document.getElementById('btn-last');
 
         const symbols = {
             'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔',
@@ -243,6 +309,20 @@
         let turn = 'w'; 
         let selected = null; 
         let gameOver = false;
+        let isAnimating = false; // Flag to block conflicting inputs during a slide
+
+        // Replay Engine State Database
+        let gameHistory = [];
+        let replayIndex = 0;
+        let isReplaying = false;
+
+        function saveHistoryState() {
+            gameHistory.push({
+                boardState: board.map(row => [...row]),
+                slippedState: itemSlippedState.map(row => [...row]),
+                activeTurn: turn
+            });
+        }
 
         // Initialize PeerJS
         const peer = new Peer();
@@ -294,7 +374,6 @@
             networkLog.textContent = `Searching for a stranger playing Level ${currentLevel}...`;
 
             const randClientStr = "client_" + Math.random().toString(36).substring(2, 10);
-            // Fixed Port to standard secure HiveMQ WebSocket port: 443
             pahoClient = new Paho.Client("broker.hivemq.com", 443, randClientStr);
 
             pahoClient.onMessageArrived = (message) => {
@@ -397,14 +476,7 @@
                 }
                 else if (payload.type === 'MOVE_EXECUTE') {
                     processSlipTurnRecovery(turn);
-                    executeMove(board, payload.move);
-                    selected = null;
-                    clearHighlights();
-                    if (!checkGameEnd()) {
-                        turn = (turn === 'w') ? 'b' : 'w';
-                        updateStatusMessage();
-                    }
-                    drawBoard();
+                    animateAndExecuteMove(payload.move);
                 }
             });
 
@@ -439,6 +511,10 @@
             turn = 'w';
             selected = null;
             gameOver = false;
+            isReplaying = false;
+            isAnimating = false;
+            gameHistory = [];
+            replayPanel.style.display = 'none';
             itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
             
             iceLayout = Array(8).fill(null).map(() => Array(8).fill(false));
@@ -447,19 +523,26 @@
                 spaces.forEach(([r,c]) => { iceLayout[r][c] = true; });
             }
             
+            saveHistoryState();
             updateStatusMessage();
             drawBoard();
         }
 
         function updateStatusMessage() {
+            if (isReplaying) {
+                statusElem.textContent = "Reviewing Historic Match Replay";
+                statusElem.style.color = "#f1c40f";
+                return;
+            }
             if (gameOver) return;
             if (!myPlayerColor) {
                 statusElem.textContent = "Connect to start game";
                 return;
             }
             let turnTxt = (turn === 'w') ? "White's Turn" : "Black's Turn";
-            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...)";
+            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...);";
             statusElem.textContent = turnTxt + identityTxt;
+            statusElem.style.color = "#2ecc71";
         }
 
         function drawBoard() {
@@ -491,8 +574,7 @@
                         const basicTurnCheck = (turn === 'w' && isWhite) || (turn === 'b' && !isWhite);
                         const matchIdentityCheck = myPlayerColor ? ((myPlayerColor === 'w' && isWhite) || (myPlayerColor === 'b' && !isWhite)) : false;
 
-                        // Frozen pieces cannot move
-                        if (!gameOver && basicTurnCheck && matchIdentityCheck && itemSlippedState[r][c] === null) {
+                        if (!gameOver && !isReplaying && !isAnimating && basicTurnCheck && matchIdentityCheck && itemSlippedState[r][c] === null) {
                             pieceDiv.setAttribute('draggable', 'true');
                             pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, r, c));
                         }
@@ -517,7 +599,7 @@
         });
 
         function onDragStart(e, r, c) {
-            if (gameOver || !myPlayerColor || turn !== myPlayerColor) {
+            if (gameOver || isReplaying || isAnimating || !myPlayerColor || turn !== myPlayerColor) {
                 e.preventDefault();
                 return;
             }
@@ -528,12 +610,13 @@
 
         function onDrop(e) {
             e.preventDefault();
+            if (isReplaying || isAnimating) return;
             const cell = e.currentTarget;
             attemptMove(parseInt(cell.dataset.row), parseInt(cell.dataset.col));
         }
 
         function onSquareClick(e) {
-            if (gameOver || !myPlayerColor || turn !== myPlayerColor) return;
+            if (gameOver || isReplaying || isAnimating || !myPlayerColor || turn !== myPlayerColor) return;
             const cell = e.currentTarget;
             const r = parseInt(cell.dataset.row);
             const c = parseInt(cell.dataset.col);
@@ -571,20 +654,70 @@
 
             if (validMove) {
                 sendDataPayload({ type: 'MOVE_EXECUTE', move: validMove });
-
                 processSlipTurnRecovery(turn);
-                executeMove(board, validMove);
-                selected = null;
-                clearHighlights();
-                
-                if (!checkGameEnd()) {
-                    turn = (turn === 'w') ? 'b' : 'w';
-                    updateStatusMessage();
-                }
-                drawBoard();
+                animateAndExecuteMove(validMove);
                 return true;
             }
             return false;
+        }
+
+        /* Slide Animation and Execution Pipeline Wrapper */
+        function animateAndExecuteMove(move) {
+            isAnimating = true;
+            selected = null;
+            clearHighlights();
+
+            const fromCell = document.querySelector(`[data-row="${move.fromR}"][data-col="${move.fromC}"]`);
+            const toCell = document.querySelector(`[data-row="${move.toR}"][data-col="${move.toC}"]`);
+            const movingPieceElem = fromCell ? fromCell.querySelector('.piece') : null;
+
+            if (movingPieceElem && fromCell && toCell) {
+                // Calculate precise sliding vector based on client bounding rect layouts
+                const fromRect = fromCell.getBoundingClientRect();
+                const toRect = toCell.getBoundingClientRect();
+                const deltaX = toRect.left - fromRect.left;
+                const deltaY = toRect.top - fromRect.top;
+
+                // Configure CSS transition runtime metrics
+                movingPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
+                
+                // If it's a Swap operation, smoothly cross-animate the secondary piece too
+                let targetPieceElem = toCell.querySelector('.piece');
+                if (move.type === 'swap' && targetPieceElem) {
+                    targetPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
+                    targetPieceElem.style.transform = `translate(${-deltaX}px, ${-deltaY}px)`;
+                } else if (targetPieceElem) {
+                    // Normal capture: fade target piece out cleanly during transit
+                    targetPieceElem.style.transition = "opacity 0.2s ease";
+                    targetPieceElem.style.opacity = "0";
+                }
+
+                // Fire the translation layer
+                movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+
+                // Wait for the transition layout calculation step to conclude
+                movingPieceElem.addEventListener('transitionend', function handler() {
+                    movingPieceElem.removeEventListener('transitionend', handler);
+                    finalizeMoveState(move);
+                });
+            } else {
+                // Fallback protection if DOM structural assets are missing
+                finalizeMoveState(move);
+            }
+        }
+
+        function finalizeMoveState(move) {
+            executeMove(board, move);
+            saveHistoryState();
+            isAnimating = false;
+
+            if (!checkGameEnd()) {
+                turn = (turn === 'w') ? 'b' : 'w';
+                updateStatusMessage();
+            } else {
+                activateReplayEngine();
+            }
+            drawBoard();
         }
 
         function clearHighlights() {
@@ -600,7 +733,7 @@
             const type = piece.toLowerCase();
             const isSlipped = itemSlippedState[r][c] !== null;
 
-            if (isSlipped) return []; // Frozen pieces cannot move
+            if (isSlipped) return []; 
 
             const rookDirs = [[1,0], [-1,0], [0,1], [0,-1]];
             const bishopDirs = [[1,1], [1,-1], [-1,1], [-1,-1]];
@@ -775,7 +908,6 @@
         function isOnBoard(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
         function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
 
-        // --- FIXED AND COMPLETED TRUNCATION FUNCTIONS ---
         function executeMove(targetBoard, move) {
             const piece = targetBoard[move.fromR][move.fromC];
             const originalSlipped = itemSlippedState[move.fromR][move.fromC];
@@ -795,9 +927,8 @@
                 
                 itemSlippedState[move.fromR][move.fromC] = null;
                 
-                // If it lands on ice Layout (Level 6 / 8)
                 if (iceLayout[move.toR][move.toC]) {
-                    itemSlippedState[move.toR][move.toC] = turn; // marked with freeze owner color
+                    itemSlippedState[move.toR][move.toC] = turn; 
                 } else {
                     itemSlippedState[move.toR][move.toC] = null;
                 }
@@ -805,7 +936,6 @@
         }
 
         function processSlipTurnRecovery(currentTurn) {
-            // Clears freeze status at the start of a player's cycle
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if (itemSlippedState[r][c] === currentTurn) {
@@ -839,6 +969,35 @@
             }
             return false;
         }
+
+        function activateReplayEngine() {
+            isReplaying = true;
+            replayIndex = gameHistory.length - 1;
+            replayPanel.style.display = 'flex';
+            updateReplayView();
+        }
+
+        function updateReplayView() {
+            const currentSnapshot = gameHistory[replayIndex];
+            board = currentSnapshot.boardState.map(row => [...row]);
+            itemSlippedState = currentSnapshot.slippedState.map(row => [...row]);
+            turn = currentSnapshot.activeTurn;
+
+            drawBoard();
+            updateStatusMessage();
+
+            replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
+
+            btnFirst.disabled = (replayIndex === 0);
+            btnPrev.disabled = (replayIndex === 0);
+            btnNext.disabled = (replayIndex === gameHistory.length - 1);
+            btnLast.disabled = (replayIndex === gameHistory.length - 1);
+        }
+
+        btnFirst.addEventListener('click', () => { replayIndex = 0; updateReplayView(); });
+        btnPrev.addEventListener('click', () => { if (replayIndex > 0) { replayIndex--; updateReplayView(); } });
+        btnNext.addEventListener('click', () => { if (replayIndex < gameHistory.length - 1) { replayIndex++; updateReplayView(); } });
+        btnLast.addEventListener('click', () => { replayIndex = gameHistory.length - 1; updateReplayView(); });
     </script>
 </body>
 </html>
