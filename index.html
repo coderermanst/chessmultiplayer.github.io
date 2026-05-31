@@ -208,7 +208,7 @@
 
         const levelDescriptions = {
             1: "Level 1: Normal Chess. Standard movement rules apply.",
-            2: "Level 2: Goblin Pawns! Pawns move 3 diagonally & 2 forward, and can jump completely over blocking elements.",
+            2: "Level 2: Goblin Pawns! Pawns move 1 or 2 squares forward or diagonally, jumping completely over obstacles.",
             3: "Level 3: Horse Queens. The traditional Queen transforms completely into an agile Knight-Queen compound construct.",
             4: "Level 4: Phantom Rooks. Heavy Siege Castles gain the dimensional ability to jump obstacles natively like Knights.",
             5: "Level 5: Kinetic Bishops. Clergy track vectors that rebound off the boundaries of the board matrix to bank paths.",
@@ -484,7 +484,17 @@
                 case 'p':
                     if (lvl2) {
                         const forward = isWhite ? -1 : 1;
-                        [[forward * 2, 0], [forward * 3, 3], [forward * 3, -3]].forEach(([dr, dc]) => {
+                        // Coordinates updated for 1 or 2 squares forward, and 1 or 2 squares diagonally forward
+                        const goblinOffsets = [
+                            [forward * 1, 0],  // 1 forward
+                            [forward * 2, 0],  // 2 forward
+                            [forward * 1, 1],  // 1 diagonal right
+                            [forward * 1, -1], // 1 diagonal left
+                            [forward * 2, 2],  // 2 diagonal right
+                            [forward * 2, -2]  // 2 diagonal left
+                        ];
+                        
+                        goblinOffsets.forEach(([dr, dc]) => {
                             const targetR = r + dr, targetC = c + dc;
                             if (isOnBoard(targetR, targetC)) {
                                 const target = currentBoard[targetR][targetC];
@@ -601,7 +611,6 @@
         function processBouncingBishops(r, c, directions, piece, currentBoard, moveList, isSlipped) {
             directions.forEach(([dr, dc]) => {
                 let currR = r + dr, currC = c + dc, currentDr = dr, currentDc = dc, bounceCount = 0;
-                // Added structural check iteration cutoff guard to definitively block crashes
                 let stepsGuard = 0; 
                 while (bounceCount <= 2 && stepsGuard < 64) {
                     stepsGuard++;
