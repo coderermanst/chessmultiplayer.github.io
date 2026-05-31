@@ -252,6 +252,7 @@
             networkLog.textContent = "Ready. Share your Room ID, or click 'Match with Stranger'!";
         });
 
+        // Event listener when another player connects to us (We are the Host/White)
         peer.on('connection', (incomingConn) => {
             if (dataConnection) {
                 incomingConn.close();
@@ -269,10 +270,12 @@
             if (!targetId || targetId === myPeerId) return;
             
             networkLog.textContent = "Connecting to peer host matrix...";
-            dataConnection = peer.connect(targetId);
             myPlayerColor = 'b'; 
             cleanupMatchmaking();
             disableLevelSelection();
+            
+            // Assign data connection and trace hooks immediately
+            dataConnection = peer.connect(targetId);
             hookNetworkEvents();
         });
 
@@ -311,18 +314,14 @@
 
                     networkLog.textContent = "Stranger encountered! Binding sockets...";
                     
-                    /* CRITICAL UPDATE: Fixed Same-Machine/Same-Browser tab signaling collision.
-                       Instead of executing .connect() instantly at the identical millisecond, 
-                       we introduce a structured, staggered handshake delay.
-                    */
                     if (myPeerId > peerOffer.id) {
                         cleanupMatchmaking();
                         setTimeout(() => {
-                            if (dataConnection) return; // Abort if other side managed to bind first
-                            dataConnection = peer.connect(peerOffer.id);
+                            if (dataConnection) return; 
                             myPlayerColor = 'b'; 
+                            dataConnection = peer.connect(peerOffer.id);
                             hookNetworkEvents();
-                        }, 500); 
+                        }, 600); 
                     }
                 } catch (err) {
                     console.error("Matchmaking parse error:", err);
@@ -357,7 +356,14 @@
             }
         }
 
+        /* CRITICAL ARCHITECTURAL FIX: 
+           Separated raw state hooks so they successfully attach parameters before 
+           the broker sets lifecycle channels up, ensuring packets are captured instantly.
+        */
         function hookNetworkEvents() {
+            if (!dataConnection) return;
+
+            // Handle open channel events cleanly
             dataConnection.on('open', () => {
                 networkLog.textContent = `Connected! You are playing as ${myPlayerColor === 'w' ? 'WHITE (Host)' : 'BLACK (Challenger)'}. Match level locked at Level ${currentLevel}.`;
                 networkLog.style.color = "#2ecc71";
@@ -370,6 +376,7 @@
                 initializeGame();
             });
 
+            // Parse incoming frame objects instantly
             dataConnection.on('data', (payload) => {
                 if (payload.type === 'RULE_SYNC') {
                     currentLevel = payload.level;
@@ -396,6 +403,11 @@
                 networkLog.textContent = "Connection lost. Opponent disconnected.";
                 networkLog.style.color = "#e74c3c";
                 gameOver = true;
+            });
+
+            dataConnection.on('error', (err) => {
+                console.error("Data connection error state:", err);
+                networkLog.textContent = "Network error. Re-instantiating tunnel...";
             });
         }
 
