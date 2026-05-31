@@ -311,11 +311,18 @@
 
                     networkLog.textContent = "Stranger encountered! Binding sockets...";
                     
+                    /* CRITICAL UPDATE: Fixed Same-Machine/Same-Browser tab signaling collision.
+                       Instead of executing .connect() instantly at the identical millisecond, 
+                       we introduce a structured, staggered handshake delay.
+                    */
                     if (myPeerId > peerOffer.id) {
                         cleanupMatchmaking();
-                        dataConnection = peer.connect(peerOffer.id);
-                        myPlayerColor = 'b'; 
-                        hookNetworkEvents();
+                        setTimeout(() => {
+                            if (dataConnection) return; // Abort if other side managed to bind first
+                            dataConnection = peer.connect(peerOffer.id);
+                            myPlayerColor = 'b'; 
+                            hookNetworkEvents();
+                        }, 500); 
                     }
                 } catch (err) {
                     console.error("Matchmaking parse error:", err);
@@ -431,7 +438,7 @@
                 return;
             }
             let turnTxt = (turn === 'w') ? "White's Turn" : "Black's Turn";
-            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...);";
+            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...)";
             statusElem.textContent = turnTxt + identityTxt;
         }
 
@@ -485,8 +492,6 @@
             levelValDisplay.textContent = currentLevel;
             levelDescDisplay.textContent = levelDescriptions[currentLevel];
             randomMatchBtn.textContent = `Match with Stranger (Level ${currentLevel})`;
-            
-            // BUG FIX 1: Ensures both internal variables and graphic arrays clean state properly upon changes
             initializeGame();
         });
 
@@ -761,8 +766,6 @@
             } else {
                 targetBoard[move.toR][move.toC] = piece;
                 targetBoard[move.fromR][move.fromC] = '';
-                
-                // BUG FIX 2: Explicitly updates the freeze tracking status across captured items
                 itemSlippedState[move.toR][move.toC] = activeFreeze;
                 itemSlippedState[move.fromR][move.fromC] = null;
 
