@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Take King Chess - Online Multiplayer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            margin: 0;
+            padding: 20px;
+            user-select: none;
+        }
+        h1 { margin-bottom: 5px; }
+        p { margin-top: 0; color: #bdc3c7; text-align: center; max-width: 500px;}
+        
+        /* Network Lobby Panel */
+        #lobby-panel {
+            background-color: #2c3e50;
+            border: 2px dashed #3498db;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            width: 480px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .lobby-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 8px 0;
+            align-items: center;
+        }
+        input {
+            padding: 8px;
+            border-radius: 4px;
+            border: none;
+            width: 200px;
+            font-size: 0.9rem;
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { background-color: #2980b9; }
+        #my-id-display {
+            font-weight: bold;
+            color: #2ecc71;
+            background: #34495e;
+            padding: 3px 8px;
+            border-radius: 4px;
+            user-select: text; 
+        }
+
+        #level-container {
+            background-color: #34495e;
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 480px;
+            box-sizing: border-box;
+        }
+        #level-slider {
+            width: 100%;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+        #level-desc {
+            font-size: 0.95rem;
+            color: #f1c40f;
+            min-height: 40px;
+            font-weight: bold;
+        }
+
+        #status {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            font-weight: bold;
+            color: #2ecc71;
+            background-color: #34495e;
+            padding: 6px 20px;
+            border-radius: 4px;
+        }
+        #chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 65px);
+            grid-template-rows: repeat(8, 65px);
+            border: 5px solid #34495e;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+            position: relative;
+        }
+        .cell {
+            width: 65px;
+            height: 65px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 42px;
+            cursor: pointer;
+            position: relative;
+        }
+        .light { background-color: #e0e4e8; }
+        .dark { background-color: #88929a; }
+        
+        .slippery::after {
+            content: '🧊';
+            font-size: 14px;
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            opacity: 0.7;
+            z-index: 1;
+        }
+        .slipped-piece {
+            opacity: 0.4 !important;
+            filter: grayscale(100%) contrast(150%) drop-shadow(0px 0px 8px #3498db) !important;
+        }
+
+        .piece {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 3;
+            cursor: grab;
+        }
+        .piece:active { cursor: grabbing; }
+        
+        .piece-w { color: #ffffff; filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.75)); }
+        .piece-b { color: #111111; filter: drop-shadow(0px 2px 2px rgba(255,255,255,0.2)); }
+        
+        .selected { background-color: #2ecc71 !important; }
+        .highlighted::before {
+            content: '';
+            width: 18px;
+            height: 18px;
+            background-color: rgba(46, 204, 113, 0.6);
+            border-radius: 50%;
+            position: absolute;
+            z-index: 2;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Take King Chess (Online Multiplayer)</h1>
+    <p>Move into danger freely. Share your Connection ID or paste a friend's to play instantly over the web.</p>
+    
+    <div id="lobby-panel">
+        <div class="lobby-row">
+            <span>Your Game Room ID: </span>
+            <span id="my-id-display">Connecting to network...</span>
+        </div>
+        <div class="lobby-row">
+            <input type="text" id="peer-id-input" placeholder="Paste Opponent's Room ID here...">
+            <button id="connect-btn">Connect & Play</button>
+        </div>
+        <div id="network-log" style="color: #f1c40f; font-size: 0.9rem; margin-top:5px;">Initializing peer node network...</div>
+    </div>
+
+    <div id="level-container">
+        <label for="level-slider" style="font-weight: bold; font-size: 1.1rem;">Game Rule Level: <span id="level-val">1</span></label>
+        <input type="range" id="level-slider" min="1" max="8" value="1">
+        <div id="level-desc">Level 1: Normal Chess. Standard movement rules apply.</div>
+    </div>
+
+    <div id="status">Awaiting Network Connection...</div>
+    <div id="chessboard"></div>
+
+    <script>
+        const boardElem = document.getElementById('chessboard');
+        const statusElem = document.getElementById('status');
+        const levelSlider = document.getElementById('level-slider');
+        const levelValDisplay = document.getElementById('level-val');
+        const levelDescDisplay = document.getElementById('level-desc');
+        
+        const myIdDisplay = document.getElementById('my-id-display');
+        const peerIdInput = document.getElementById('peer-id-input');
+        const connectBtn = document.getElementById('connect-btn');
+        const networkLog = document.getElementById('network-log');
+
+        const symbols = {
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔',
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚'
+        };
+
+        let currentLevel = 1;
+        let myPlayerColor = null; 
+        let dataConnection = null; 
+
+        const levelDescriptions = {
+            1: "Level 1: Normal Chess. Standard movement rules apply.",
+            2: "Level 2: Goblin Pawns! Pawns move 3 diagonally & 2 forward, and can jump completely over blocking elements.",
+            3: "Level 3: Horse Queens. The traditional Queen transforms completely into an agile Knight-Queen compound construct.",
+            4: "Level 4: Phantom Rooks. Heavy Siege Castles gain the dimensional ability to jump obstacles natively like Knights.",
+            5: "Level 5: Kinetic Bishops. Clergy track vectors that rebound off the boundaries of the board matrix to bank paths.",
+            6: "Level 6: Perilous Ice. Random tiles look slippery. Landing freezes pieces: they cannot capture and require 1 turn to stabilize.",
+            7: "Level 7: Sovereign Swap. The Monarch rules space, enjoying capability to swap coordinate matrices safely with any ally.",
+            8: "Level 8: Total Chaos Rule! Every single variant capability across all level structures initializes concurrently."
+        };
+
+        let board = [];
+        let itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
+        let iceLayout = Array(8).fill(null).map(() => Array(8).fill(false));
+
+        let turn = 'w'; 
+        let selected = null; 
+        let gameOver = false;
+
+        // Initialize PeerJS P2P Node Connection
+        const peer = new Peer();
+
+        peer.on('open', (id) => {
+            myIdDisplay.textContent = id;
+            networkLog.textContent = "Ready. Share your Room ID with a friend, or connect to theirs!";
+        });
+
+        peer.on('connection', (incomingConn) => {
+            if (dataConnection) return; 
+            dataConnection = incomingConn;
+            myPlayerColor = 'w'; 
+            hookNetworkEvents();
+        });
+
+        connectBtn.addEventListener('click', () => {
+            const targetId = peerIdInput.value.trim();
+            if (!targetId) return;
+            
+            networkLog.textContent = "Connecting to peer host matrix...";
+            dataConnection = peer.connect(targetId);
+            myPlayerColor = 'b'; 
+            hookNetworkEvents();
+        });
+
+        function hookNetworkEvents() {
+            dataConnection.on('open', () => {
+                networkLog.textContent = `Connected! You are playing as ${myPlayerColor === 'w' ? 'WHITE (Host)' : 'BLACK (Challenger)'}.`;
+                networkLog.style.color = "#2ecc71";
+                
+                if (myPlayerColor === 'w') {
+                    sendDataPayload({ type: 'RULE_SYNC', level: currentLevel });
+                }
+                initializeGame();
+            });
+
+            dataConnection.on('data', (payload) => {
+                if (payload.type === 'RULE_SYNC') {
+                    currentLevel = payload.level;
+                    levelSlider.value = currentLevel;
+                    levelValDisplay.textContent = currentLevel;
+                    levelDescDisplay.textContent = levelDescriptions[currentLevel];
+                    initializeGame();
+                }
+                else if (payload.type === 'MOVE_EXECUTE') {
+                    processSlipTurnRecovery(turn);
+                    executeMove(board, payload.move);
+                    selected = null;
+                    clearHighlights();
+                    if (!checkGameEnd()) {
+                        turn = (turn === 'w') ? 'b' : 'w';
+                        updateStatusMessage();
+                    }
+                    drawBoard();
+                }
+            });
+
+            dataConnection.on('close', () => {
+                networkLog.textContent = "Connection lost. Opponent disconnected.";
+                networkLog.style.color = "#e74c3c";
+                gameOver = true;
+            });
+        }
+
+        function sendDataPayload(obj) {
+            if (dataConnection && dataConnection.open) {
+                dataConnection.send(obj);
+            }
+        }
+
+        function initializeGame() {
+            board = [
+                ['r','n','b','q','k','b','n','r'],
+                ['p','p','p','p','p','p','p','p'],
+                ['','','','','','','',''],
+                ['','','','','','','',''],
+                ['','','','','','','',''],
+                ['','','','','','','',''],
+                ['P','P','P','P','P','P','P','P'],
+                ['R','N','B','Q','K','B','N','R']
+            ];
+            turn = 'w';
+            selected = null;
+            gameOver = false;
+            itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
+            
+            iceLayout = Array(8).fill(null).map(() => Array(8).fill(false));
+            if (currentLevel === 6 || currentLevel === 8) {
+                let spaces = [[2,2], [2,5], [3,3], [3,4], [4,3], [4,4], [5,2], [5,5]];
+                spaces.forEach(([r,c]) => { iceLayout[r][c] = true; });
+            }
+            
+            updateStatusMessage();
+            drawBoard();
+        }
+
+        function updateStatusMessage() {
+            if (gameOver) return;
+            if (!myPlayerColor) {
+                statusElem.textContent = "Connect to start game";
+                return;
+            }
+            let turnTxt = (turn === 'w') ? "White's Turn" : "Black's Turn";
+            let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...)";
+            statusElem.textContent = turnTxt + identityTxt;
+        }
+
+        function drawBoard() {
+            boardElem.innerHTML = '';
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell', (r + c) % 2 === 0 ? 'light' : 'dark');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+
+                    if (iceLayout[r][c]) cell.classList.add('slippery');
+
+                    cell.addEventListener('dragover', onDragOver);
+                    cell.addEventListener('drop', onDrop);
+                    cell.addEventListener('click', onSquareClick);
+
+                    const pieceType = board[r][c];
+                    if (pieceType) {
+                        const pieceDiv = document.createElement('div');
+                        pieceDiv.classList.add('piece');
+                        pieceDiv.textContent = symbols[pieceType];
+                        
+                        const isWhite = pieceType === pieceType.toUpperCase();
+                        pieceDiv.classList.add(isWhite ? 'piece-w' : 'piece-b');
+                        
+                        if (itemSlippedState[r][c]) pieceDiv.classList.add('slipped-piece');
+                        
+                        const basicTurnCheck = (turn === 'w' && isWhite) || (turn === 'b' && !isWhite);
+                        const matchIdentityCheck = myPlayerColor ? ((myPlayerColor === 'w' && isWhite) || (myPlayerColor === 'b' && !isWhite)) : false;
+
+                        if (!gameOver && basicTurnCheck && matchIdentityCheck) {
+                            pieceDiv.setAttribute('draggable', 'true');
+                            pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, r, c));
+                        }
+                        
+                        cell.appendChild(pieceDiv);
+                    }
+                    boardElem.appendChild(cell);
+                }
+            }
+        }
+
+        levelSlider.addEventListener('input', (e) => {
+            if (myPlayerColor === 'b') {
+                levelSlider.value = currentLevel; 
+                return;
+            }
+            currentLevel = parseInt(e.target.value);
+            levelValDisplay.textContent = currentLevel;
+            levelDescDisplay.textContent = levelDescriptions[currentLevel];
+            
+            sendDataPayload({ type: 'RULE_SYNC', level: currentLevel });
+            initializeGame();
+        });
+
+        function onDragStart(e, r, c) {
+            if (gameOver || !myPlayerColor || turn !== myPlayerColor) {
+                e.preventDefault();
+                return;
+            }
+            selectPiece(r, c);
+        }
+
+        function onDragOver(e) { e.preventDefault(); }
+
+        function onDrop(e) {
+            e.preventDefault();
+            const cell = e.currentTarget;
+            attemptMove(parseInt(cell.dataset.row), parseInt(cell.dataset.col));
+        }
+
+        function onSquareClick(e) {
+            if (gameOver || !myPlayerColor || turn !== myPlayerColor) return;
+            const cell = e.currentTarget;
+            const r = parseInt(cell.dataset.row);
+            const c = parseInt(cell.dataset.col);
+
+            if (selected) {
+                if (attemptMove(r, c)) return;
+            }
+            
+            const piece = board[r][c];
+            const isWhitePiece = piece && piece === piece.toUpperCase();
+            const matchedColorOwnership = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
+            
+            if (piece && matchedColorOwnership && ((turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece))) {
+                selectPiece(r, c);
+            } else {
+                selected = null;
+                clearHighlights();
+            }
+        }
+
+        function selectPiece(r, c) {
+            clearHighlights();
+            selected = { r, c };
+            document.querySelector(`[data-row="${r}"][data-col="${c}"]`)?.classList.add('selected');
+
+            getLegalMoves(r, c, board).forEach(m => {
+                document.querySelector(`[data-row="${m.toR}"][data-col="${m.toC}"]`)?.classList.add('highlighted');
+            });
+        }
+
+        function attemptMove(r, c) {
+            if (!selected) return false;
+            const moves = getLegalMoves(selected.r, selected.c, board);
+            const validMove = moves.find(m => m.toR === r && m.toC === c);
+
+            if (validMove) {
+                sendDataPayload({ type: 'MOVE_EXECUTE', move: validMove });
+
+                processSlipTurnRecovery(turn);
+                executeMove(board, validMove);
+                selected = null;
+                clearHighlights();
+                
+                if (!checkGameEnd()) {
+                    turn = (turn === 'w') ? 'b' : 'w';
+                    updateStatusMessage();
+                }
+                drawBoard();
+                return true;
+            }
+            return false;
+        }
+
+        function clearHighlights() {
+            document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected', 'highlighted'));
+        }
+
+        function getLegalMoves(r, c, currentBoard) {
+            const piece = currentBoard[r][c];
+            if (!piece) return [];
+            
+            const moves = [];
+            const isWhite = piece === piece.toUpperCase();
+            const type = piece.toLowerCase();
+            const isSlipped = itemSlippedState[r][c] !== null;
+
+            const rookDirs = [[1,0], [-1,0], [0,1], [0,-1]];
+            const bishopDirs = [[1,1], [1,-1], [-1,1], [-1,-1]];
+            const knightMoves = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
+
+            const lvl2 = (currentLevel === 2 || currentLevel === 8);
+            const lvl3 = (currentLevel === 3 || currentLevel === 8);
+            const lvl4 = (currentLevel === 4 || currentLevel === 8);
+            const lvl5 = (currentLevel === 5 || currentLevel === 8);
+            const lvl7 = (currentLevel === 7 || currentLevel === 8);
+
+            switch (type) {
+                case 'p':
+                    if (lvl2) {
+                        const forward = isWhite ? -1 : 1;
+                        [[forward * 2, 0], [forward * 3, 3], [forward * 3, -3]].forEach(([dr, dc]) => {
+                            const targetR = r + dr, targetC = c + dc;
+                            if (isOnBoard(targetR, targetC)) {
+                                const target = currentBoard[targetR][targetC];
+                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                    moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
+                                }
+                            }
+                        });
+                    } else {
+                        const dir = isWhite ? -1 : 1;
+                        if (isOnBoard(r + dir, c) && !currentBoard[r + dir][c]) {
+                            moves.push({ fromR: r, fromC: c, toR: r + dir, toC: c, type: 'normal' });
+                            if (r === (isWhite ? 6 : 1) && !currentBoard[r + dir * 2][c]) {
+                                moves.push({ fromR: r, fromC: c, toR: r + dir * 2, toC: c, type: 'normal' });
+                            }
+                        }
+                        [-1, 1].forEach(dc => {
+                            if (isOnBoard(r + dir, c + dc)) {
+                                const target = currentBoard[r + dir][c + dc];
+                                if (target && isEnemy(piece, target) && !isSlipped) {
+                                    moves.push({ fromR: r, fromC: c, toR: r + dir, toC: c + dc, type: 'normal' });
+                                }
+                            }
+                        });
+                    }
+                    break;
+
+                case 'r':
+                    processSlidingMoves(r, c, rookDirs, piece, currentBoard, moves, isSlipped);
+                    if (lvl4) {
+                        knightMoves.forEach(([dr, dc]) => {
+                            if (isOnBoard(r + dr, c + dc)) {
+                                const target = currentBoard[r + dr][c + dc];
+                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                    moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
+                                }
+                            }
+                        });
+                    }
+                    break;
+
+                case 'b':
+                    if (lvl5) processBouncingBishops(r, c, bishopDirs, piece, currentBoard, moves, isSlipped);
+                    else processSlidingMoves(r, c, bishopDirs, piece, currentBoard, moves, isSlipped);
+                    break;
+
+                case 'q':
+                    processSlidingMoves(r, c, [...rookDirs, ...bishopDirs], piece, currentBoard, moves, isSlipped);
+                    if (lvl3) {
+                        knightMoves.forEach(([dr, dc]) => {
+                            if (isOnBoard(r + dr, c + dc)) {
+                                const target = currentBoard[r + dr][c + dc];
+                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                    moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
+                                }
+                            }
+                        });
+                    }
+                    break;
+
+                case 'n':
+                    knightMoves.forEach(([dr, dc]) => {
+                        if (isOnBoard(r + dr, c + dc)) {
+                            const target = currentBoard[r + dr][c + dc];
+                            if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
+                            }
+                        }
+                    });
+                    break;
+
+                case 'k':
+                    [...rookDirs, ...bishopDirs].forEach(([dr, dc]) => {
+                        if (isOnBoard(r + dr, c + dc)) {
+                            const target = currentBoard[r + dr][c + dc];
+                            if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
+                            }
+                        }
+                    });
+                    if (lvl7) {
+                        for (let tr = 0; tr < 8; tr++) {
+                            for (let tc = 0; tc < 8; tc++) {
+                                const targetPiece = currentBoard[tr][tc];
+                                if (targetPiece && !isEnemy(piece, targetPiece) && targetPiece.toLowerCase() !== 'k') {
+                                    moves.push({ fromR: r, fromC: c, toR: tr, toC: tc, type: 'swap' });
+                                }
+                            }
+                        }
+                    }
+                    break;
+            }
+            return moves;
+        }
+
+        function processSlidingMoves(r, c, directions, piece, currentBoard, moveList, isSlipped) {
+            directions.forEach(([dr, dc]) => {
+                let currR = r + dr, currC = c + dc;
+                while (isOnBoard(currR, currC)) {
+                    const target = currentBoard[currR][currC];
+                    if (!target) {
+                        moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                    } else {
+                        if (isEnemy(piece, target) && !isSlipped) {
+                            moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                        }
+                        break;
+                    }
+                    currR += dr; currC += dc;
+                }
+            });
+        }
+
+        function processBouncingBishops(r, c, directions, piece, currentBoard, moveList, isSlipped) {
+            directions.forEach(([dr, dc]) => {
+                let currR = r + dr, currC = c + dc, currentDr = dr, currentDc = dc, bounceCount = 0;
+                // Added structural check iteration cutoff guard to definitively block crashes
+                let stepsGuard = 0; 
+                while (bounceCount <= 2 && stepsGuard < 64) {
+                    stepsGuard++;
+                    let hitWall = false;
+                    
+                    if (currR < 0) { currentDr = 1; currR = 1; hitWall = true; }
+                    else if (currR >= 8) { currentDr = -1; currR = 6; hitWall = true; }
+                    
+                    if (currC < 0) { currentDc = 1; currC = 1; hitWall = true; }
+                    else if (currC >= 8) { currentDc = -1; currC = 6; hitWall = true; }
+                    
+                    if (hitWall) { 
+                        bounceCount++; 
+                        if (!isOnBoard(currR, currC)) break; 
+                    }
+
+                    const target = currentBoard[currR][currC];
+                    if (!target) {
+                        moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                    } else {
+                        if ((currR !== r || currC !== c) && isEnemy(piece, target) && !isSlipped) {
+                            moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                        }
+                        break;
+                    }
+                    currR += currentDr; currC += currentDc;
+                }
+            });
+        }
+
+        function isOnBoard(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+        function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
+
+        function executeMove(targetBoard, move) {
+            const piece = targetBoard[move.fromR][move.fromC];
+            const activeFreeze = itemSlippedState[move.fromR][move.fromC];
+
+            if (move.type === 'swap') {
+                const secondaryPiece = targetBoard[move.toR][move.toC];
+                const secondaryFreeze = itemSlippedState[move.toR][move.toC];
+                targetBoard[move.toR][move.toC] = piece;
+                targetBoard[move.fromR][move.fromC] = secondaryPiece;
+                itemSlippedState[move.toR][move.toC] = activeFreeze;
+                itemSlippedState[move.fromR][move.fromC] = secondaryFreeze;
+            } else {
+                targetBoard[move.toR][move.toC] = piece;
+                targetBoard[move.fromR][move.fromC] = '';
+                itemSlippedState[move.toR][move.toC] = activeFreeze;
+                itemSlippedState[move.fromR][move.fromC] = null;
+
+                if (piece === 'P' && move.toR === 0) targetBoard[move.toR][move.toC] = 'Q';
+                if (piece === 'p' && move.toR === 7) targetBoard[move.toR][move.toC] = 'q';
+            }
+
+            if ((currentLevel === 6 || currentLevel === 8) && iceLayout[move.toR][move.toC]) {
+                itemSlippedState[move.toR][move.toC] = targetBoard[move.toR][move.toC] === targetBoard[move.toR][move.toC].toUpperCase() ? 'w' : 'b';
+            }
+        }
+
+        function processSlipTurnRecovery(color) {
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (itemSlippedState[r][c] === color) itemSlippedState[r][c] = null;
+                }
+            }
+        }
+
+        function checkGameEnd() {
+            let wK = false, bK = false;
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (board[r][c] === 'K') wK = true;
+                    if (board[r][c] === 'k') bK = true;
+                }
+            }
+            if (!wK) { 
+                statusElem.textContent = "GAME OVER — BLACK CAPTURED THE WHITE KING!"; 
+                statusElem.style.color = "#e74c3c"; gameOver = true; return true; 
+            }
+            if (!bK) { 
+                statusElem.textContent = "GAME OVER — WHITE CAPTURED THE BLACK KING!"; 
+                statusElem.style.color = "#f1c40f"; gameOver = true; return true; 
+            }
+            return false;
+        }
+
+        initializeGame();
+    </script>
+</body>
+</html>
