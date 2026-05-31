@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Take King Chess - Online Multiplayer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -294,7 +294,8 @@
             networkLog.textContent = `Searching for a stranger playing Level ${currentLevel}...`;
 
             const randClientStr = "client_" + Math.random().toString(36).substring(2, 10);
-            pahoClient = new Paho.MQTT.Client("broker.hivemq.com", 8014, randClientStr);
+            // Fixed Port to standard secure HiveMQ WebSocket port: 443
+            pahoClient = new Paho.Client("broker.hivemq.com", 443, randClientStr);
 
             pahoClient.onMessageArrived = (message) => {
                 if (!isSearching) return;
@@ -342,7 +343,7 @@
         function broadcastPresence() {
             if (pahoClient && pahoClient.isConnected()) {
                 const lobbyPing = JSON.stringify({ id: myPeerId, timestamp: Date.now() });
-                const message = new Paho.MQTT.Message(lobbyPing);
+                const message = new Paho.Message(lobbyPing);
                 message.destinationName = currentMqttTopic;
                 pahoClient.send(message);
             }
@@ -485,12 +486,13 @@
                         const isWhite = pieceType === pieceType.toUpperCase();
                         pieceDiv.classList.add(isWhite ? 'piece-w' : 'piece-b');
                         
-                        if (itemSlippedState[r][c]) pieceDiv.classList.add('slipped-piece');
+                        if (itemSlippedState[r][c] !== null) pieceDiv.classList.add('slipped-piece');
                         
                         const basicTurnCheck = (turn === 'w' && isWhite) || (turn === 'b' && !isWhite);
                         const matchIdentityCheck = myPlayerColor ? ((myPlayerColor === 'w' && isWhite) || (myPlayerColor === 'b' && !isWhite)) : false;
 
-                        if (!gameOver && basicTurnCheck && matchIdentityCheck) {
+                        // Frozen pieces cannot move
+                        if (!gameOver && basicTurnCheck && matchIdentityCheck && itemSlippedState[r][c] === null) {
                             pieceDiv.setAttribute('draggable', 'true');
                             pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, r, c));
                         }
@@ -544,7 +546,7 @@
             const isWhitePiece = piece && piece === piece.toUpperCase();
             const matchedColorOwnership = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
             
-            if (piece && matchedColorOwnership && ((turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece))) {
+            if (piece && matchedColorOwnership && ((turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece)) && itemSlippedState[r][c] === null) {
                 selectPiece(r, c);
             } else {
                 selected = null;
@@ -598,6 +600,8 @@
             const type = piece.toLowerCase();
             const isSlipped = itemSlippedState[r][c] !== null;
 
+            if (isSlipped) return []; // Frozen pieces cannot move
+
             const rookDirs = [[1,0], [-1,0], [0,1], [0,-1]];
             const bishopDirs = [[1,1], [1,-1], [-1,1], [-1,-1]];
             const knightMoves = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
@@ -625,7 +629,7 @@
                             const targetR = r + dr, targetC = c + dc;
                             if (isOnBoard(targetR, targetC)) {
                                 const target = currentBoard[targetR][targetC];
-                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                if (!target || isEnemy(piece, target)) {
                                     moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
                                 }
                             }
@@ -634,14 +638,14 @@
                         const dir = isWhite ? -1 : 1;
                         if (isOnBoard(r + dir, c) && !currentBoard[r + dir][c]) {
                             moves.push({ fromR: r, fromC: c, toR: r + dir, toC: c, type: 'normal' });
-                            if (r === (isWhite ? 6 : 1) && !currentBoard[r + dir * 2][c]) {
+                            if (r === (isWhite ? 6 : 1) && !currentBoard[r + dir * 2][c] && !currentBoard[r + dir][c]) {
                                 moves.push({ fromR: r, fromC: c, toR: r + dir * 2, toC: c, type: 'normal' });
                             }
                         }
                         [-1, 1].forEach(dc => {
                             if (isOnBoard(r + dir, c + dc)) {
                                 const target = currentBoard[r + dir][c + dc];
-                                if (target && isEnemy(piece, target) && !isSlipped) {
+                                if (target && isEnemy(piece, target)) {
                                     moves.push({ fromR: r, fromC: c, toR: r + dir, toC: c + dc, type: 'normal' });
                                 }
                             }
@@ -650,12 +654,12 @@
                     break;
 
                 case 'r':
-                    processSlidingMoves(r, c, rookDirs, piece, currentBoard, moves, isSlipped);
+                    processSlidingMoves(r, c, rookDirs, piece, currentBoard, moves);
                     if (lvl4) {
                         knightMoves.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
-                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                if (!target || isEnemy(piece, target)) {
                                     moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
                                 }
                             }
@@ -664,17 +668,17 @@
                     break;
 
                 case 'b':
-                    if (lvl5) processBouncingBishops(r, c, bishopDirs, piece, currentBoard, moves, isSlipped);
-                    else processSlidingMoves(r, c, bishopDirs, piece, currentBoard, moves, isSlipped);
+                    if (lvl5) processBouncingBishops(r, c, bishopDirs, piece, currentBoard, moves);
+                    else processSlidingMoves(r, c, bishopDirs, piece, currentBoard, moves);
                     break;
 
                 case 'q':
-                    processSlidingMoves(r, c, [...rookDirs, ...bishopDirs], piece, currentBoard, moves, isSlipped);
+                    processSlidingMoves(r, c, [...rookDirs, ...bishopDirs], piece, currentBoard, moves);
                     if (lvl3) {
                         knightMoves.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
-                                if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                                if (!target || isEnemy(piece, target)) {
                                     moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
                                 }
                             }
@@ -686,8 +690,8 @@
                     knightMoves.forEach(([dr, dc]) => {
                         if (isOnBoard(r + dr, c + dc)) {
                             const target = currentBoard[r + dr][c + dc];
-                            if (!target || (isEnemy(piece, target) && !isSlipped)) {
-                                    moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
+                            if (!target || isEnemy(piece, target)) {
+                                moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
                             }
                         }
                     });
@@ -697,7 +701,7 @@
                     [...rookDirs, ...bishopDirs].forEach(([dr, dc]) => {
                         if (isOnBoard(r + dr, c + dc)) {
                             const target = currentBoard[r + dr][c + dc];
-                            if (!target || (isEnemy(piece, target) && !isSlipped)) {
+                            if (!target || isEnemy(piece, target)) {
                                 moves.push({ fromR: r, fromC: c, toR: r + dr, toC: c + dc, type: 'normal' });
                             }
                         }
@@ -717,7 +721,7 @@
             return moves;
         }
 
-        function processSlidingMoves(r, c, directions, piece, currentBoard, moveList, isSlipped) {
+        function processSlidingMoves(r, c, directions, piece, currentBoard, moveList) {
             directions.forEach(([dr, dc]) => {
                 let currR = r + dr, currC = c + dc;
                 while (isOnBoard(currR, currC)) {
@@ -725,7 +729,7 @@
                     if (!target) {
                         moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
                     } else {
-                        if (isEnemy(piece, target) && !isSlipped) {
+                        if (isEnemy(piece, target)) {
                             moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
                         }
                         break;
@@ -735,7 +739,7 @@
             });
         }
 
-        function processBouncingBishops(r, c, directions, piece, currentBoard, moveList, isSlipped) {
+        function processBouncingBishops(r, c, directions, piece, currentBoard, moveList) {
             directions.forEach(([dr, dc]) => {
                 let currR = r + dr, currC = c + dc, currentDr = dr, currentDc = dc, bounceCount = 0;
                 let stepsGuard = 0; 
@@ -758,7 +762,7 @@
                     if (!target) {
                         moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
                     } else {
-                        if ((currR !== r || currC !== c) && isEnemy(piece, target) && !isSlipped) {
+                        if ((currR !== r || currC !== c) && isEnemy(piece, target)) {
                             moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
                         }
                         break;
@@ -771,27 +775,29 @@
         function isOnBoard(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
         function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
 
+        // --- FIXED AND COMPLETED TRUNCATION FUNCTIONS ---
         function executeMove(targetBoard, move) {
             const piece = targetBoard[move.fromR][move.fromC];
-            const slippedState = itemSlippedState[move.fromR][move.fromC];
+            const originalSlipped = itemSlippedState[move.fromR][move.fromC];
             
             if (move.type === 'swap') {
                 const targetPiece = targetBoard[move.toR][move.toC];
-                const targetSlippedState = itemSlippedState[move.toR][move.toC];
+                const targetSlipped = itemSlippedState[move.toR][move.toC];
                 
                 targetBoard[move.toR][move.toC] = piece;
                 targetBoard[move.fromR][move.fromC] = targetPiece;
                 
-                itemSlippedState[move.toR][move.toC] = slippedState;
-                itemSlippedState[move.fromR][move.fromC] = targetSlippedState;
+                itemSlippedState[move.toR][move.toC] = originalSlipped;
+                itemSlippedState[move.fromR][move.fromC] = targetSlipped;
             } else {
                 targetBoard[move.toR][move.toC] = piece;
                 targetBoard[move.fromR][move.fromC] = '';
                 
                 itemSlippedState[move.fromR][move.fromC] = null;
                 
+                // If it lands on ice Layout (Level 6 / 8)
                 if (iceLayout[move.toR][move.toC]) {
-                    itemSlippedState[move.toR][move.toC] = turn;
+                    itemSlippedState[move.toR][move.toC] = turn; // marked with freeze owner color
                 } else {
                     itemSlippedState[move.toR][move.toC] = null;
                 }
@@ -799,6 +805,7 @@
         }
 
         function processSlipTurnRecovery(currentTurn) {
+            // Clears freeze status at the start of a player's cycle
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if (itemSlippedState[r][c] === currentTurn) {
@@ -811,24 +818,23 @@
         function checkGameEnd() {
             let whiteKingFound = false;
             let blackKingFound = false;
-
+            
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if (board[r][c] === 'K') whiteKingFound = true;
                     if (board[r][c] === 'k') blackKingFound = true;
                 }
             }
-
-            if (!whiteKingFound) {
-                statusElem.textContent = "Black Wins by Regicide!";
-                statusElem.style.color = "#e74c3c";
+            
+            if (!whiteKingFound || !blackKingFound) {
                 gameOver = true;
-                return true;
-            }
-            if (!blackKingFound) {
-                statusElem.textContent = "White Wins by Regicide!";
-                statusElem.style.color = "#2ecc71";
-                gameOver = true;
+                if (!whiteKingFound) {
+                    statusElem.textContent = "Black Wins by Regicide!";
+                    statusElem.style.color = "#e74c3c";
+                } else {
+                    statusElem.textContent = "White Wins by Regicide!";
+                    statusElem.style.color = "#2ecc71";
+                }
                 return true;
             }
             return false;
