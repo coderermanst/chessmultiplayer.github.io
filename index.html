@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Take King Chess - Online Multiplayer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -220,9 +220,10 @@
         let myPlayerColor = null; 
         let dataConnection = null; 
         let myPeerId = null;
-        let mqttClient = null;
+        let pahoClient = null;
         let isSearching = false;
         let heartbeatInterval = null;
+        let currentMqttTopic = "";
 
         const levelDescriptions = {
             1: "Level 1: Normal Chess. Standard movement rules apply.",
@@ -243,6 +244,7 @@
         let selected = null; 
         let gameOver = false;
 
+        // Initialize PeerJS
         const peer = new Peer();
 
         peer.on('open', (id) => {
@@ -252,7 +254,6 @@
             networkLog.textContent = "Ready. Share your Room ID, or click 'Match with Stranger'!";
         });
 
-        // Event listener when another player connects to us (We are the Host/White)
         peer.on('connection', (incomingConn) => {
             if (dataConnection) {
                 incomingConn.close();
@@ -274,7 +275,6 @@
             cleanupMatchmaking();
             disableLevelSelection();
             
-            // Assign data connection and trace hooks immediately
             dataConnection = peer.connect(targetId);
             hookNetworkEvents();
         });
@@ -293,22 +293,13 @@
             disableLevelSelection();
             networkLog.textContent = `Searching for a stranger playing Level ${currentLevel}...`;
 
-            mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
+            const randClientStr = "client_" + Math.random().toString(36).substring(2, 10);
+            pahoClient = new Paho.MQTT.Client("broker.hivemq.com", 8014, randClientStr);
 
-            mqttClient.on('connect', () => {
-                const topic = `take_king_chess_match_lvl_${currentLevel}`;
-                mqttClient.subscribe(topic);
-                broadcastPresence(topic);
-
-                heartbeatInterval = setInterval(() => {
-                    broadcastPresence(topic);
-                }, 2500);
-            });
-
-            mqttClient.on('message', (topic, message) => {
+            pahoClient.onMessageArrived = (message) => {
                 if (!isSearching) return;
                 try {
-                    const peerOffer = JSON.parse(message.toString());
+                    const peerOffer = JSON.parse(message.payloadString);
                     if (peerOffer.id === myPeerId) return;
                     if (Date.now() - peerOffer.timestamp > 6000) return;
 
@@ -326,13 +317,34 @@
                 } catch (err) {
                     console.error("Matchmaking parse error:", err);
                 }
+            };
+
+            pahoClient.connect({
+                onSuccess: () => {
+                    if (!isSearching) return;
+                    currentMqttTopic = `take_king_chess_match_lvl_${currentLevel}`;
+                    pahoClient.subscribe(currentMqttTopic);
+                    broadcastPresence();
+
+                    heartbeatInterval = setInterval(() => {
+                        broadcastPresence();
+                    }, 2500);
+                },
+                onFailure: (err) => {
+                    console.error("MQTT Connection failed:", err);
+                    networkLog.textContent = "Lobby server connection failed. Retrying...";
+                    cleanupMatchmaking();
+                },
+                useSSL: true
             });
         });
 
-        function broadcastPresence(topic) {
-            if (mqttClient && mqttClient.connected) {
+        function broadcastPresence() {
+            if (pahoClient && pahoClient.isConnected()) {
                 const lobbyPing = JSON.stringify({ id: myPeerId, timestamp: Date.now() });
-                mqttClient.publish(topic, lobbyPing);
+                const message = new Paho.MQTT.Message(lobbyPing);
+                message.destinationName = currentMqttTopic;
+                pahoClient.send(message);
             }
         }
 
@@ -350,20 +362,17 @@
             randomMatchBtn.disabled = (myPlayerColor !== null);
             connectBtn.disabled = (myPlayerColor !== null);
             peerIdInput.disabled = (myPlayerColor !== null);
-            if (mqttClient) {
-                mqttClient.end();
-                mqttClient = null;
+            if (pahoClient) {
+                try {
+                    if (pahoClient.isConnected()) pahoClient.disconnect();
+                } catch(e) {}
+                pahoClient = null;
             }
         }
 
-        /* CRITICAL ARCHITECTURAL FIX: 
-           Separated raw state hooks so they successfully attach parameters before 
-           the broker sets lifecycle channels up, ensuring packets are captured instantly.
-        */
         function hookNetworkEvents() {
             if (!dataConnection) return;
 
-            // Handle open channel events cleanly
             dataConnection.on('open', () => {
                 networkLog.textContent = `Connected! You are playing as ${myPlayerColor === 'w' ? 'WHITE (Host)' : 'BLACK (Challenger)'}. Match level locked at Level ${currentLevel}.`;
                 networkLog.style.color = "#2ecc71";
@@ -376,7 +385,6 @@
                 initializeGame();
             });
 
-            // Parse incoming frame objects instantly
             dataConnection.on('data', (payload) => {
                 if (payload.type === 'RULE_SYNC') {
                     currentLevel = payload.level;
@@ -407,7 +415,6 @@
 
             dataConnection.on('error', (err) => {
                 console.error("Data connection error state:", err);
-                networkLog.textContent = "Network error. Re-instantiating tunnel...";
             });
         }
 
@@ -766,58 +773,66 @@
 
         function executeMove(targetBoard, move) {
             const piece = targetBoard[move.fromR][move.fromC];
-            const activeFreeze = itemSlippedState[move.fromR][move.fromC];
-
+            const slippedState = itemSlippedState[move.fromR][move.fromC];
+            
             if (move.type === 'swap') {
-                const secondaryPiece = targetBoard[move.toR][move.toC];
-                const secondaryFreeze = itemSlippedState[move.toR][move.toC];
+                const targetPiece = targetBoard[move.toR][move.toC];
+                const targetSlippedState = itemSlippedState[move.toR][move.toC];
+                
                 targetBoard[move.toR][move.toC] = piece;
-                targetBoard[move.fromR][move.fromC] = secondaryPiece;
-                itemSlippedState[move.toR][move.toC] = activeFreeze;
-                itemSlippedState[move.fromR][move.fromC] = secondaryFreeze;
+                targetBoard[move.fromR][move.fromC] = targetPiece;
+                
+                itemSlippedState[move.toR][move.toC] = slippedState;
+                itemSlippedState[move.fromR][move.fromC] = targetSlippedState;
             } else {
                 targetBoard[move.toR][move.toC] = piece;
                 targetBoard[move.fromR][move.fromC] = '';
-                itemSlippedState[move.toR][move.toC] = activeFreeze;
+                
                 itemSlippedState[move.fromR][move.fromC] = null;
-
-                if (piece === 'P' && move.toR === 0) targetBoard[move.toR][move.toC] = 'Q';
-                if (piece === 'p' && move.toR === 7) targetBoard[move.toR][move.toC] = 'q';
-            }
-
-            if ((currentLevel === 6 || currentLevel === 8) && iceLayout[move.toR][move.toC]) {
-                itemSlippedState[move.toR][move.toC] = targetBoard[move.toR][move.toC] === targetBoard[move.toR][move.toC].toUpperCase() ? 'w' : 'b';
+                
+                if (iceLayout[move.toR][move.toC]) {
+                    itemSlippedState[move.toR][move.toC] = turn;
+                } else {
+                    itemSlippedState[move.toR][move.toC] = null;
+                }
             }
         }
 
-        function processSlipTurnRecovery(color) {
+        function processSlipTurnRecovery(currentTurn) {
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
-                    if (itemSlippedState[r][c] === color) itemSlippedState[r][c] = null;
+                    if (itemSlippedState[r][c] === currentTurn) {
+                        itemSlippedState[r][c] = null;
+                    }
                 }
             }
         }
 
         function checkGameEnd() {
-            let wK = false, bK = false;
+            let whiteKingFound = false;
+            let blackKingFound = false;
+
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
-                    if (board[r][c] === 'K') wK = true;
-                    if (board[r][c] === 'k') bK = true;
+                    if (board[r][c] === 'K') whiteKingFound = true;
+                    if (board[r][c] === 'k') blackKingFound = true;
                 }
             }
-            if (!wK) { 
-                statusElem.textContent = "GAME OVER — BLACK CAPTURED THE WHITE KING!"; 
-                statusElem.style.color = "#e74c3c"; gameOver = true; return true; 
+
+            if (!whiteKingFound) {
+                statusElem.textContent = "Black Wins by Regicide!";
+                statusElem.style.color = "#e74c3c";
+                gameOver = true;
+                return true;
             }
-            if (!bK) { 
-                statusElem.textContent = "GAME OVER — WHITE CAPTURED THE BLACK KING!"; 
-                statusElem.style.color = "#f1c40f"; gameOver = true; return true; 
+            if (!blackKingFound) {
+                statusElem.textContent = "White Wins by Regicide!";
+                statusElem.style.color = "#2ecc71";
+                gameOver = true;
+                return true;
             }
             return false;
         }
-
-        initializeGame();
     </script>
 </body>
 </html>
