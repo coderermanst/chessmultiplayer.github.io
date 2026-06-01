@@ -415,7 +415,7 @@
                     const peerOffer = JSON.parse(message.payloadString);
                     if (peerOffer.id === myPeerId) return;
                     if (matchedPeerIds.has(peerOffer.id)) return;
-                    if (Date.now() - peerOffer.timestamp > 6000) return;
+                    if (Date.now() - peerOffer.timestamp > 30000) return;
 
                     networkLog.textContent = "Stranger encountered! Binding sockets...";
                     matchedPeerIds.add(peerOffer.id);
@@ -442,7 +442,7 @@
 
                     heartbeatInterval = setInterval(() => {
                         broadcastPresence();
-                    }, 2500);
+                    }, 2000);
                 },
                 onFailure: (err) => {
                     console.error("MQTT Connection failed:", err);
@@ -997,16 +997,12 @@
                         for (let tc = 0; tc < boardSize; tc++) {
                             const targetPiece = currentBoard[tr][tc];
                             if (!targetPiece) continue;
+                            if (isEnemy(piece, targetPiece)) continue;
+                            if (targetPiece.toLowerCase() === 'g' || targetPiece.toLowerCase() === 'k') continue;
                             
-                            // Guardian can only move in front of friendly pieces
-                            if (!isEnemy(piece, targetPiece) && (tr !== r || tc !== c)) {
-                                const targetIsWhite = targetPiece === targetPiece.toUpperCase();
-                                const frontOffset = targetIsWhite ? -1 : 1; 
-                                const frontR = tr + frontOffset;
-                                
-                                if (isOnBoard(frontR, tc) && !currentBoard[frontR][tc]) {
-                                    moves.push({ fromR: r, fromC: c, toR: frontR, toC: tc, type: 'normal' });
-                                }
+                            const guardianR = isWhite ? tr - 1 : tr + 1;
+                            if (isOnBoard(guardianR, tc) && !currentBoard[guardianR][tc]) {
+                                moves.push({ fromR: r, fromC: c, toR: guardianR, toC: tc, type: 'normal' });
                             }
                         }
                     }
@@ -1015,17 +1011,17 @@
             return moves;
         }
 
-        function processSlidingMoves(r, c, directions, piece, currentBoard, moves) {
-            directions.forEach(([dr, dc]) => {
-                for (let i = 1; i < boardSize; i++) {
-                    const nr = r + dr * i, nc = c + dc * i;
-                    if (!isOnBoard(nr, nc)) break;
-                    const target = currentBoard[nr][nc];
+        function processSlidingMoves(r, c, dirs, piece, currentBoard, moves) {
+            dirs.forEach(([dr, dc]) => {
+                for (let d = 1; d < boardSize; d++) {
+                    const targetR = r + dr * d, targetC = c + dc * d;
+                    if (!isOnBoard(targetR, targetC)) break;
+                    const target = currentBoard[targetR][targetC];
                     if (!target) {
-                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                        moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
                     } else {
                         if (isEnemy(piece, target)) {
-                            moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                            moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
                         }
                         break;
                     }
@@ -1033,132 +1029,138 @@
             });
         }
 
-        function processBouncingBishops(r, c, directions, piece, currentBoard, moves) {
-            directions.forEach(([dr, dc]) => {
-                let nr = r, nc = c;
-                while (true) {
-                    nr += dr; nc += dc;
-                    if (!isOnBoard(nr, nc)) {
-                        nr -= dr; nc -= dc;
-                        dr = -dr; dc = -dc;
-                        nr += dr; nc += dc;
-                        if (!isOnBoard(nr, nc)) break;
-                    }
-                    const target = currentBoard[nr][nc];
-                    if (!target) {
-                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
-                    } else {
-                        if (isEnemy(piece, target)) {
-                            moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+        function processBouncingBishops(r, c, dirs, piece, currentBoard, moves) {
+            dirs.forEach(([dr, dc]) => {
+                let pr = r, pc = c;
+                for (let bounces = 0; bounces < 2; bounces++) {
+                    let moved = false;
+                    for (let d = 1; d < boardSize; d++) {
+                        const targetR = pr + dr * d, targetC = pc + dc * d;
+                        if (!isOnBoard(targetR, targetC)) break;
+                        const target = currentBoard[targetR][targetC];
+                        if (!target) {
+                            moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
+                            moved = true;
+                        } else {
+                            if (isEnemy(piece, target)) {
+                                moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
+                            }
+                            break;
                         }
-                        break;
                     }
-                    if (nr === r && nc === c) break;
+                    if (!moved || bounces >= 1) break;
+                    if (pr + dr < 0 || pr + dr >= boardSize) dr = -dr;
+                    if (pc + dc < 0 || pc + dc >= boardSize) dc = -dc;
+                    pr += dr; pc += dc;
                 }
             });
         }
 
-        function isOnBoard(r, c) {
-            return r >= 0 && r < boardSize && c >= 0 && c < boardSize;
-        }
+        function isOnBoard(r, c) { return r >= 0 && r < boardSize && c >= 0 && c < boardSize; }
+        function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
 
-        function isEnemy(piece1, piece2) {
-            const isWhite1 = piece1 === piece1.toUpperCase();
-            const isWhite2 = piece2 === piece2.toUpperCase();
-            return isWhite1 !== isWhite2;
-        }
+        function executeMove(tempBoard, move) {
+            const piece = tempBoard[move.fromR][move.fromC];
+            tempBoard[move.toR][move.toC] = piece;
+            tempBoard[move.fromR][move.fromC] = '';
 
-        function executeMove(currentBoard, move) {
-            const piece = currentBoard[move.fromR][move.fromC];
-            if (move.type === 'swap') {
-                const targetPiece = currentBoard[move.toR][move.toC];
-                currentBoard[move.toR][move.toC] = piece;
-                currentBoard[move.fromR][move.fromC] = targetPiece;
-                itemSlippedState[move.fromR][move.fromC] = null;
-                itemSlippedState[move.toR][move.toC] = null;
-            } else {
-                currentBoard[move.toR][move.toC] = piece;
-                currentBoard[move.fromR][move.fromC] = '';
-                itemSlippedState[move.fromR][move.fromC] = null;
-                
-                if (currentLevel === 6 || currentLevel === 10) {
-                    if (iceLayout[move.toR][move.toC]) {
-                        itemSlippedState[move.toR][move.toC] = 'frozen';
-                    } else {
-                        itemSlippedState[move.toR][move.toC] = null;
-                    }
-                }
+            if (move.type === 'swap' && currentLevel === 7) {
+                const swappedPiece = tempBoard[move.toR][move.toC];
+                tempBoard[move.toR][move.toC] = piece;
+                tempBoard[move.fromR][move.fromC] = swappedPiece;
             }
+
+            if (iceLayout[move.toR][move.toC]) {
+                itemSlippedState[move.toR][move.toC] = 1;
+            }
+            itemSlippedState[move.fromR][move.fromC] = null;
         }
 
-        function processSlipTurnRecovery(currentTurn) {
+        function processSlipTurnRecovery(turn) {
             for (let r = 0; r < boardSize; r++) {
                 for (let c = 0; c < boardSize; c++) {
-                    if (itemSlippedState[r][c] === 'frozen') {
-                        itemSlippedState[r][c] = null;
+                    if (itemSlippedState[r][c] !== null) {
+                        const pieceAtCell = board[r][c];
+                        const isWhitePiece = pieceAtCell && pieceAtCell === pieceAtCell.toUpperCase();
+                        const pieceBelongsToTurn = (turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece);
+                        if (pieceBelongsToTurn) {
+                            itemSlippedState[r][c] += 1;
+                            if (itemSlippedState[r][c] > 1) {
+                                itemSlippedState[r][c] = null;
+                            }
+                        }
                     }
                 }
             }
         }
 
         function checkGameEnd() {
-            const whiteKingExists = board.some(row => row.includes('K'));
-            const blackKingExists = board.some(row => row.includes('k'));
-            
-            if (!whiteKingExists) {
-                statusElem.textContent = "Black Wins! White King Captured.";
-                statusElem.style.color = "#e74c3c";
-                return true;
+            for (let r = 0; r < boardSize; r++) {
+                for (let c = 0; c < boardSize; c++) {
+                    const piece = board[r][c];
+                    if (piece && piece.toLowerCase() === 'k') {
+                        const isWhitePiece = piece === piece.toUpperCase();
+                        const isMyKing = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
+                        if (isMyKing) return false;
+                    }
+                }
             }
-            if (!blackKingExists) {
-                statusElem.textContent = "White Wins! Black King Captured.";
-                statusElem.style.color = "#e74c3c";
-                return true;
-            }
-            return false;
+            return true;
         }
 
         function activateReplayEngine() {
+            gameOver = true;
+            statusElem.textContent = "Checkmate! Game Over. Review your moves below.";
+            statusElem.style.color = "#f1c40f";
             replayPanel.style.display = 'flex';
             replayIndex = 0;
-            isReplaying = true;
             updateReplayDisplay();
         }
 
         function updateReplayDisplay() {
-            if (gameHistory.length === 0) return;
             replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
-            
-            const historyState = gameHistory[replayIndex];
-            board = historyState.boardState.map(row => [...row]);
-            itemSlippedState = historyState.slippedState.map(row => [...row]);
-            turn = historyState.activeTurn;
-            drawBoard();
+            btnFirst.disabled = replayIndex === 0;
+            btnPrev.disabled = replayIndex === 0;
+            btnNext.disabled = replayIndex === gameHistory.length - 1;
+            btnLast.disabled = replayIndex === gameHistory.length - 1;
         }
 
         btnFirst.addEventListener('click', () => {
             replayIndex = 0;
-            updateReplayDisplay();
-        });
-
-        btnLast.addEventListener('click', () => {
-            replayIndex = gameHistory.length - 1;
-            updateReplayDisplay();
+            loadReplayState();
         });
 
         btnPrev.addEventListener('click', () => {
             if (replayIndex > 0) {
                 replayIndex--;
-                updateReplayDisplay();
+                loadReplayState();
             }
         });
 
         btnNext.addEventListener('click', () => {
             if (replayIndex < gameHistory.length - 1) {
                 replayIndex++;
-                updateReplayDisplay();
+                loadReplayState();
             }
         });
+
+        btnLast.addEventListener('click', () => {
+            replayIndex = gameHistory.length - 1;
+            loadReplayState();
+        });
+
+        function loadReplayState() {
+            if (replayIndex >= 0 && replayIndex < gameHistory.length) {
+                const state = gameHistory[replayIndex];
+                board = state.boardState.map(row => [...row]);
+                itemSlippedState = state.slippedState.map(row => [...row]);
+                turn = state.activeTurn;
+                isReplaying = true;
+                updateStatusMessage();
+                drawBoard();
+                updateReplayDisplay();
+            }
+        }
     </script>
 </body>
 </html>
