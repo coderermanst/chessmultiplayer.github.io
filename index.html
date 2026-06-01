@@ -27,7 +27,7 @@
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 15px;
-            width: 480px;
+            width: 520px;
             text-align: center;
             box-sizing: border-box;
         }
@@ -82,7 +82,7 @@
             margin-bottom: 15px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             text-align: center;
-            width: 480px;
+            width: 520px;
             box-sizing: border-box;
         }
         #level-slider {
@@ -110,45 +110,34 @@
         
         #board-wrapper {
             position: relative;
-            width: 520px;
-            height: 520px;
         }
 
         #chessboard {
             display: grid;
-            grid-template-columns: repeat(8, 65px);
-            grid-template-rows: repeat(8, 65px);
             border: 5px solid #34495e;
             box-shadow: 0 12px 28px rgba(0,0,0,0.4);
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
             transition: transform 0.5s ease;
         }
         
-        /* Flips board wrapper 180 degrees if player is Black */
         .flipped-board {
             transform: rotate(180deg);
         }
 
         #arrow-svg {
             position: absolute;
-            top: 5px; /* Offset the 5px chess board border */
+            top: 5px;
             left: 5px;
-            width: 520px;
-            height: 520px;
             pointer-events: none;
             z-index: 5;
         }
 
         .cell {
-            width: 65px;
-            height: 65px;
+            width: 60px;
+            height: 60px;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: 42px;
+            font-size: 38px;
             cursor: pointer;
             position: relative;
         }
@@ -157,7 +146,7 @@
         
         .slippery::after {
             content: '🧊';
-            font-size: 14px;
+            font-size: 12px;
             position: absolute;
             top: 2px;
             right: 2px;
@@ -179,11 +168,9 @@
             cursor: grab;
             position: relative;
             transform: translate(0, 0);
-            transition: none;
         }
         .piece:active { cursor: grabbing; }
         
-        /* Auto-corrects piece rotation if the board container is flipped */
         .flipped-board .piece {
             transform: rotate(180deg);
         }
@@ -194,8 +181,8 @@
         .selected { background-color: #2ecc71 !important; }
         .highlighted::before {
             content: '';
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             background-color: rgba(46, 204, 113, 0.6);
             border-radius: 50%;
             position: absolute;
@@ -203,7 +190,6 @@
             pointer-events: none;
         }
 
-        /* Replay Engine UI Controls */
         #replay-panel {
             display: none;
             flex-direction: column;
@@ -213,7 +199,7 @@
             border-radius: 8px;
             padding: 15px;
             margin-top: 20px;
-            width: 480px;
+            width: 520px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.5);
             box-sizing: border-box;
         }
@@ -248,7 +234,9 @@
         }
     </style>
 </head>
-<body oncontextmenu="return false;"> <h1>Take King Chess (Online Multiplayer)</h1>
+<body oncontextmenu="return false;">
+
+    <h1>Take King Chess (Online Multiplayer)</h1>
     <p>Move into danger freely. Match a stranger or input your friend's room ID. Right-click and drag to create strategic layout arrows.</p>
     
     <div id="lobby-panel">
@@ -268,7 +256,7 @@
 
     <div id="level-container">
         <label for="level-slider" style="font-weight: bold; font-size: 1.1rem;">Game Rule Level: <span id="level-val">1</span></label>
-        <input type="range" id="level-slider" min="1" max="8" value="1">
+        <input type="range" id="level-slider" min="1" max="10" value="1">
         <div id="level-desc">Level 1: Normal Chess. Standard movement rules apply.</div>
     </div>
 
@@ -276,7 +264,7 @@
     
     <div id="board-wrapper">
         <div id="chessboard"></div>
-        <svg id="arrow-svg" viewBox="0 0 520 520">
+        <svg id="arrow-svg">
             <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="6" refY="3.5" orient="auto">
                     <polygon points="0 0, 10 3.5, 0 7" fill="rgba(230, 126, 34, 0.85)" />
@@ -309,7 +297,6 @@
         const networkLog = document.getElementById('network-log');
         const arrowSvg = document.getElementById('arrow-svg');
 
-        // Replay DOM Elements
         const replayPanel = document.getElementById('replay-panel');
         const replayCounter = document.getElementById('replay-counter');
         const btnFirst = document.getElementById('btn-first');
@@ -318,8 +305,8 @@
         const btnLast = document.getElementById('btn-last');
 
         const symbols = {
-            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔',
-            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚'
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'G': '🛡️',
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'g': '🛡️'
         };
 
         let currentLevel = 1;
@@ -339,23 +326,24 @@
             5: "Level 5: Kinetic Bishops. Clergy track vectors that rebound off the boundaries of the board matrix to bank paths.",
             6: "Level 6: Perilous Ice. Random tiles look slippery. Landing freezes pieces: they cannot capture and require 1 turn to stabilize.",
             7: "Level 7: Sovereign Swap. The Monarch rules space, enjoying capability to swap coordinate matrices safely with any ally.",
-            8: "Level 8: Total Chaos Rule! Every single variant capability across all level structures initializes concurrently."
+            8: "Level 8: Blitz Chargers. Horses harness double energy output, allowing them to jump twice as far as traditional Knights.",
+            9: "Level 9: The Grand Arena. Grid size safely expands to 10x10. Introduces the Guardian (G), who drops out of nowhere directly in front of your own pieces.",
+            10: "Level 10: Absolute Armageddon! All structural rules, variant configurations, and size scales mesh into one singular sandbox."
         };
 
         let board = [];
-        let itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
-        let iceLayout = Array(8).fill(null).map(() => Array(8).fill(false));
+        let boardSize = 8;
+        let itemSlippedState = [];
+        let iceLayout = [];
 
         let turn = 'w'; 
         let selected = null; 
         let gameOver = false;
         let isAnimating = false; 
 
-        // Arrow drawing vector database
         let activeArrows = [];
         let drawingStartCell = null;
 
-        // Replay Engine State Database
         let gameHistory = [];
         let replayIndex = 0;
         let isReplaying = false;
@@ -368,7 +356,6 @@
             });
         }
 
-        // Initialize PeerJS
         const peer = new Peer();
 
         peer.on('open', (id) => {
@@ -498,12 +485,11 @@
             if (!dataConnection) return;
 
             dataConnection.on('open', () => {
-                networkLog.textContent = `Connected! You are playing as ${myPlayerColor === 'w' ? 'WHITE (Host)' : 'BLACK (Challenger)'}. Match level locked at Level ${currentLevel}.`;
+                networkLog.textContent = `Connected! Playing Level ${currentLevel}.`;
                 networkLog.style.color = "#2ecc71";
                 cleanupMatchmaking();
                 disableLevelSelection();
                 
-                // Trigger Board Flip if user color is black
                 if (myPlayerColor === 'b') {
                     boardElem.classList.add('flipped-board');
                 } else {
@@ -532,13 +518,9 @@
             });
 
             dataConnection.on('close', () => {
-                networkLog.textContent = "Connection lost. Opponent disconnected.";
+                networkLog.textContent = "Connection lost. Opponent left.";
                 networkLog.style.color = "#e74c3c";
                 gameOver = true;
-            });
-
-            dataConnection.on('error', (err) => {
-                console.error("Data connection error state:", err);
             });
         }
 
@@ -549,16 +531,42 @@
         }
 
         function initializeGame() {
-            board = [
-                ['r','n','b','q','k','b','n','r'],
-                ['p','p','p','p','p','p','p','p'],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['','','','','','','',''],
-                ['P','P','P','P','P','P','P','P'],
-                ['R','N','B','Q','K','B','N','R']
-            ];
+            boardSize = (currentLevel === 9 || currentLevel === 10) ? 10 : 8;
+            
+            boardElem.style.gridTemplateColumns = `repeat(${boardSize}, 60px)`;
+            boardElem.style.gridTemplateRows = `repeat(${boardSize}, 60px)`;
+            const pixels = boardSize * 60;
+            arrowSvg.setAttribute('width', pixels + 10);
+            arrowSvg.setAttribute('height', pixels + 10);
+            arrowSvg.style.width = (pixels + 10) + 'px';
+            arrowSvg.style.height = (pixels + 10) + 'px';
+
+            if (boardSize === 10) {
+                board = [
+                    ['r','n','b','q','k','g','g','b','n','r'],
+                    ['p','p','p','p','p','p','p','p','p','p'],
+                    ['','','','','','','','','',''],
+                    ['','','','','','','','','',''],
+                    ['','','','','','','','','',''],
+                    ['','','','','','','','','',''],
+                    ['','','','','','','','','',''],
+                    ['','','','','','','','','',''],
+                    ['P','P','P','P','P','P','P','P','P','P'],
+                    ['R','N','B','Q','K','G','G','B','N','R']
+                ];
+            } else {
+                board = [
+                    ['r','n','b','q','k','b','n','r'],
+                    ['p','p','p','p','p','p','p','p'],
+                    ['','','','','','','',''],
+                    ['','','','','','','',''],
+                    ['','','','','','','',''],
+                    ['','','','','','','',''],
+                    ['P','P','P','P','P','P','P','P'],
+                    ['R','N','B','Q','K','B','N','R']
+                ];
+            }
+
             turn = 'w';
             selected = null;
             gameOver = false;
@@ -568,11 +576,12 @@
             redrawArrows();
             gameHistory = [];
             replayPanel.style.display = 'none';
-            itemSlippedState = Array(8).fill(null).map(() => Array(8).fill(null));
             
-            iceLayout = Array(8).fill(null).map(() => Array(8).fill(false));
-            if (currentLevel === 6 || currentLevel === 8) {
-                let spaces = [[2,2], [2,5], [3,3], [3,4], [4,3], [4,4], [5,2], [5,5]];
+            itemSlippedState = Array(boardSize).fill(null).map(() => Array(boardSize).fill(null));
+            iceLayout = Array(boardSize).fill(null).map(() => Array(boardSize).fill(false));
+            
+            if (currentLevel === 6 || currentLevel === 10) {
+                let spaces = boardSize === 10 ? [[3,3], [3,6], [4,4], [4,5], [5,4], [5,5], [6,3], [6,6]] : [[2,2], [2,5], [3,3], [3,4], [4,3], [4,4], [5,2], [5,5]];
                 spaces.forEach(([r,c]) => { iceLayout[r][c] = true; });
             }
             
@@ -583,7 +592,7 @@
 
         function updateStatusMessage() {
             if (isReplaying) {
-                statusElem.textContent = "Reviewing Historic Match Replay";
+                statusElem.textContent = "Reviewing Match Replay";
                 statusElem.style.color = "#f1c40f";
                 return;
             }
@@ -600,8 +609,8 @@
 
         function drawBoard() {
             boardElem.innerHTML = '';
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
+            for (let r = 0; r < boardSize; r++) {
+                for (let c = 0; c < boardSize; c++) {
                     const cell = document.createElement('div');
                     cell.classList.add('cell', (r + c) % 2 === 0 ? 'light' : 'dark');
                     cell.dataset.row = r;
@@ -611,8 +620,6 @@
 
                     cell.addEventListener('dragover', onDragOver);
                     cell.addEventListener('drop', onDrop);
-                    
-                    // Wire up pointer systems to capture mouse inputs for click-selection and right-click tracking
                     cell.addEventListener('mousedown', onSquareMouseDown);
                     cell.addEventListener('mouseup', onSquareMouseUp);
 
@@ -671,16 +678,14 @@
             attemptMove(parseInt(cell.dataset.row), parseInt(cell.dataset.col));
         }
 
-        /* Mouse Event Core Interceptors (Handles left-clicks and right-click strategic layout vectors) */
         function onSquareMouseDown(e) {
             const cell = e.currentTarget;
             const r = parseInt(cell.dataset.row);
             const c = parseInt(cell.dataset.col);
 
-            if (e.button === 2) { // Right Click
+            if (e.button === 2) { 
                 drawingStartCell = { r, c };
-            } else if (e.button === 0) { // Left Click
-                // Clear active board layout annotations on left click
+            } else if (e.button === 0) { 
                 if (activeArrows.length > 0) {
                     activeArrows = [];
                     redrawArrows();
@@ -706,15 +711,13 @@
         }
 
         function onSquareMouseUp(e) {
-            if (e.button === 2 && drawingStartCell) { // Right Click release
+            if (e.button === 2 && drawingStartCell) { 
                 const cell = e.currentTarget;
                 const r = parseInt(cell.dataset.row);
                 const c = parseInt(cell.dataset.col);
 
                 if (drawingStartCell.r !== r || drawingStartCell.c !== c) {
                     const arrowEntry = { fromR: drawingStartCell.r, fromC: drawingStartCell.c, toR: r, toC: c };
-                    
-                    // Toggle arrow off if identical duplicate path is drawn over again
                     const duplicateIndex = activeArrows.findIndex(a => a.fromR === arrowEntry.fromR && a.fromC === arrowEntry.fromC && a.toR === arrowEntry.toR && a.toC === arrowEntry.toC);
                     if (duplicateIndex !== -1) {
                         activeArrows.splice(duplicateIndex, 1);
@@ -727,36 +730,28 @@
             }
         }
 
-        /* Responsive SVG Arrow Grid Vector Redraw Pipeline */
         function redrawArrows() {
-            // Flush all old layout arrows except the defs template node
             const elements = arrowSvg.querySelectorAll('line');
             elements.forEach(el => el.remove());
 
+            const maxPx = boardSize * 60;
             activeArrows.forEach(arrow => {
-                // Determine layout coordinates relative to standard 65px cells
-                let x1 = arrow.fromC * 65 + 32.5;
-                let y1 = arrow.fromR * 65 + 32.5;
-                let x2 = arrow.toC * 65 + 32.5;
-                let y2 = arrow.toR * 65 + 32.5;
+                let x1 = arrow.fromC * 60 + 30;
+                let y1 = arrow.fromR * 60 + 30;
+                let x2 = arrow.toC * 60 + 30;
+                let y2 = arrow.toR * 60 + 30;
 
-                // Adjust vectors if client board flip is currently active for Black
                 if (myPlayerColor === 'b') {
-                    x1 = 520 - x1;
-                    y1 = 520 - y1;
-                    x2 = 520 - x2;
-                    y2 = 520 - y2;
+                    x1 = maxPx - x1; y1 = maxPx - y1;
+                    x2 = maxPx - x2; y2 = maxPx - y2;
                 }
 
                 const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', x1);
-                line.setAttribute('y1', y1);
-                line.setAttribute('x2', x2);
-                line.setAttribute('y2', y2);
+                line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2); line.setAttribute('y2', y2);
                 line.setAttribute('stroke', 'rgba(230, 126, 34, 0.85)');
                 line.setAttribute('stroke-width', '5');
                 line.setAttribute('marker-end', 'url(#arrowhead)');
-                
                 arrowSvg.appendChild(line);
             });
         }
@@ -785,13 +780,10 @@
             return false;
         }
 
-        /* Dynamic Visual Slide Logic (Factoring Board Inversions) */
         function animateAndExecuteMove(move) {
             isAnimating = true;
             selected = null;
             clearHighlights();
-
-            // Clear visual arrows upon any board piece layout alterations
             activeArrows = [];
             redrawArrows();
 
@@ -803,14 +795,11 @@
                 const fromRect = fromCell.getBoundingClientRect();
                 const toRect = toCell.getBoundingClientRect();
                 
-                // Track standard delta movement shifts
                 let deltaX = toRect.left - fromRect.left;
                 let deltaY = toRect.top - fromRect.top;
 
-                // Absolute invert structural vectors if client matches flipped black criteria
                 if (myPlayerColor === 'b') {
-                    deltaX = -deltaX;
-                    deltaY = -deltaY;
+                    deltaX = -deltaX; deltaY = -deltaY;
                 }
 
                 movingPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
@@ -818,7 +807,6 @@
                 let targetPieceElem = toCell.querySelector('.piece');
                 if (move.type === 'swap' && targetPieceElem) {
                     targetPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
-                    // Cross swap target piece inversion configuration
                     if (myPlayerColor === 'b') {
                         targetPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
                     } else {
@@ -829,7 +817,6 @@
                     targetPieceElem.style.opacity = "0";
                 }
 
-                // Append rotation lock variables if flipped state rules apply to the item element
                 if (myPlayerColor === 'b') {
                     movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
                 } else {
@@ -847,6 +834,14 @@
 
         function finalizeMoveState(move) {
             executeMove(board, move);
+            
+            const pieceAtDestination = board[move.toR][move.toC];
+            if (pieceAtDestination === 'P' && move.toR === 0) {
+                board[move.toR][move.toC] = 'Q';
+            } else if (pieceAtDestination === 'p' && move.toR === (boardSize - 1)) {
+                board[move.toR][move.toC] = 'q';
+            }
+
             saveHistoryState();
             isAnimating = false;
 
@@ -870,33 +865,29 @@
             const moves = [];
             const isWhite = piece === piece.toUpperCase();
             const type = piece.toLowerCase();
-            const isSlipped = itemSlippedState[r][c] !== null;
-
-            if (isSlipped) return []; 
+            if (itemSlippedState[r][c] !== null) return []; 
 
             const rookDirs = [[1,0], [-1,0], [0,1], [0,-1]];
             const bishopDirs = [[1,1], [1,-1], [-1,1], [-1,-1]];
-            const knightMoves = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
+            
+            let knightOffsets = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
 
-            const lvl2 = (currentLevel === 2 || currentLevel === 8);
-            const lvl3 = (currentLevel === 3 || currentLevel === 8);
-            const lvl4 = (currentLevel === 4 || currentLevel === 8);
-            const lvl5 = (currentLevel === 5 || currentLevel === 8);
-            const lvl7 = (currentLevel === 7 || currentLevel === 8);
+            const lvl2 = (currentLevel === 2 || currentLevel === 10);
+            const lvl3 = (currentLevel === 3 || currentLevel === 10);
+            const lvl4 = (currentLevel === 4 || currentLevel === 10);
+            const lvl5 = (currentLevel === 5 || currentLevel === 10);
+            const lvl7 = (currentLevel === 7 || currentLevel === 10);
+            const lvl8 = (currentLevel === 8 || currentLevel === 10);
+
+            if (lvl8) {
+                knightOffsets = knightOffsets.concat([[4,2],[4,-2],[-4,2],[-4,-2],[2,4],[2,-4],[-2,4],[-2,-4]]);
+            }
 
             switch (type) {
                 case 'p':
                     if (lvl2) {
                         const forward = isWhite ? -1 : 1;
-                        const goblinOffsets = [
-                            [forward * 1, 0],  
-                            [forward * 2, 0],  
-                            [forward * 1, 1],  
-                            [forward * 1, -1], 
-                            [forward * 2, 2],  
-                            [forward * 2, -2]  
-                        ];
-                        
+                        const goblinOffsets = [[forward * 1, 0], [forward * 2, 0], [forward * 1, 1], [forward * 1, -1], [forward * 2, 2], [forward * 2, -2]];
                         goblinOffsets.forEach(([dr, dc]) => {
                             const targetR = r + dr, targetC = c + dc;
                             if (isOnBoard(targetR, targetC)) {
@@ -910,7 +901,7 @@
                         const dir = isWhite ? -1 : 1;
                         if (isOnBoard(r + dir, c) && !currentBoard[r + dir][c]) {
                             moves.push({ fromR: r, fromC: c, toR: r + dir, toC: c, type: 'normal' });
-                            if (r === (isWhite ? 6 : 1) && !currentBoard[r + dir * 2][c] && !currentBoard[r + dir][c]) {
+                            if (r === (isWhite ? (boardSize - 2) : 1) && !currentBoard[r + dir * 2][c] && !currentBoard[r + dir][c]) {
                                 moves.push({ fromR: r, fromC: c, toR: r + dir * 2, toC: c, type: 'normal' });
                             }
                         }
@@ -928,7 +919,7 @@
                 case 'r':
                     processSlidingMoves(r, c, rookDirs, piece, currentBoard, moves);
                     if (lvl4) {
-                        knightMoves.forEach(([dr, dc]) => {
+                        knightOffsets.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
                                 if (!target || isEnemy(piece, target)) {
@@ -947,7 +938,7 @@
                 case 'q':
                     processSlidingMoves(r, c, [...rookDirs, ...bishopDirs], piece, currentBoard, moves);
                     if (lvl3) {
-                        knightMoves.forEach(([dr, dc]) => {
+                        knightOffsets.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
                                 if (!target || isEnemy(piece, target)) {
@@ -959,7 +950,7 @@
                     break;
 
                 case 'n':
-                    knightMoves.forEach(([dr, dc]) => {
+                    knightOffsets.forEach(([dr, dc]) => {
                         if (isOnBoard(r + dr, c + dc)) {
                             const target = currentBoard[r + dr][c + dc];
                             if (!target || isEnemy(piece, target)) {
@@ -979,11 +970,31 @@
                         }
                     });
                     if (lvl7) {
-                        for (let tr = 0; tr < 8; tr++) {
-                            for (let tc = 0; tc < 8; tc++) {
+                        for (let tr = 0; tr < boardSize; tr++) {
+                            for (let tc = 0; tc < boardSize; tc++) {
                                 const targetPiece = currentBoard[tr][tc];
                                 if (targetPiece && !isEnemy(piece, targetPiece) && targetPiece.toLowerCase() !== 'k') {
                                     moves.push({ fromR: r, fromC: c, toR: tr, toC: tc, type: 'swap' });
+                                }
+                            }
+                        }
+                    }
+                    break;
+
+                case 'g':
+                    // Guardian Logic: Look for any matching friendly piece on the board
+                    for (let tr = 0; tr < boardSize; tr++) {
+                        for (let tc = 0; tc < boardSize; tc++) {
+                            const targetPiece = currentBoard[tr][tc];
+                            if (targetPiece && !isEnemy(piece, targetPiece) && (tr !== r || tc !== c)) {
+                                const targetIsWhite = targetPiece === targetPiece.toUpperCase();
+                                const frontOffset = targetIsWhite ? -1 : 1; 
+                                const frontR = tr + frontOffset;
+                                
+                                if (isOnBoard(frontR, tc) && !currentBoard[frontR][tc]) {
+                                    if (!moves.some(m => m.toR === frontR && m.toC === tc)) {
+                                        moves.push({ fromR: r, fromC: c, toR: frontR, toC: tc, type: 'normal' });
+                                    }
                                 }
                             }
                         }
@@ -1020,10 +1031,10 @@
                     let hitWall = false;
                     
                     if (currR < 0) { currentDr = 1; currR = 1; hitWall = true; }
-                    else if (currR >= 8) { currentDr = -1; currR = 6; hitWall = true; }
+                    else if (currR >= boardSize) { currentDr = -1; currR = boardSize - 2; hitWall = true; }
                     
                     if (currC < 0) { currentDc = 1; currC = 1; hitWall = true; }
-                    else if (currC >= 8) { currentDc = -1; currC = 6; hitWall = true; }
+                    else if (currC >= boardSize) { currentDc = -1; currC = boardSize - 2; hitWall = true; }
                     
                     if (hitWall) { 
                         bounceCount++; 
@@ -1044,7 +1055,7 @@
             });
         }
 
-        function isOnBoard(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+        function isOnBoard(r, c) { return r >= 0 && r < boardSize && c >= 0 && c < boardSize; }
         function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
 
         function executeMove(targetBoard, move) {
@@ -1065,7 +1076,6 @@
                 targetBoard[move.fromR][move.fromC] = '';
                 
                 itemSlippedState[move.fromR][move.fromC] = null;
-                
                 if (iceLayout[move.toR][move.toC]) {
                     itemSlippedState[move.toR][move.toC] = turn; 
                 } else {
@@ -1075,8 +1085,8 @@
         }
 
         function processSlipTurnRecovery(currentTurn) {
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
+            for (let r = 0; r < boardSize; r++) {
+                for (let c = 0; c < boardSize; c++) {
                     if (itemSlippedState[r][c] === currentTurn) {
                         itemSlippedState[r][c] = null;
                     }
@@ -1088,8 +1098,8 @@
             let whiteKingFound = false;
             let blackKingFound = false;
             
-            for (let r = 0; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
+            for (let r = 0; r < boardSize; r++) {
+                for (let c = 0; c < boardSize; c++) {
                     if (board[r][c] === 'K') whiteKingFound = true;
                     if (board[r][c] === 'k') blackKingFound = true;
                 }
@@ -1137,6 +1147,8 @@
         btnPrev.addEventListener('click', () => { if (replayIndex > 0) { replayIndex--; updateReplayView(); } });
         btnNext.addEventListener('click', () => { if (replayIndex < gameHistory.length - 1) { replayIndex++; updateReplayView(); } });
         btnLast.addEventListener('click', () => { replayIndex = gameHistory.length - 1; updateReplayView(); });
+
+        initializeGame();
     </script>
 </body>
 </html>
