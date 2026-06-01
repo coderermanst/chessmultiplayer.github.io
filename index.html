@@ -982,11 +982,18 @@
                     break;
 
                 case 'g':
-                    // Guardian Logic: Look for any matching friendly piece on the board
+                    // Guardian Logic: Can capture enemy pieces or move in front of friendly pieces
                     for (let tr = 0; tr < boardSize; tr++) {
                         for (let tc = 0; tc < boardSize; tc++) {
                             const targetPiece = currentBoard[tr][tc];
-                            if (targetPiece && !isEnemy(piece, targetPiece) && (tr !== r || tc !== c)) {
+                            if (!targetPiece) continue;
+                            
+                            // If it's an enemy piece, can capture it
+                            if (isEnemy(piece, targetPiece)) {
+                                moves.push({ fromR: r, fromC: c, toR: tr, toC: tc, type: 'normal' });
+                            }
+                            // If it's a friendly piece, can move in front of it
+                            else if (!isEnemy(piece, targetPiece) && (tr !== r || tc !== c)) {
                                 const targetIsWhite = targetPiece === targetPiece.toUpperCase();
                                 const frontOffset = targetIsWhite ? -1 : 1; 
                                 const frontR = tr + frontOffset;
@@ -1001,154 +1008,154 @@
                     }
                     break;
             }
+
             return moves;
         }
 
-        function processSlidingMoves(r, c, directions, piece, currentBoard, moveList) {
+        function processSlidingMoves(r, c, directions, piece, currentBoard, moves) {
             directions.forEach(([dr, dc]) => {
-                let currR = r + dr, currC = c + dc;
-                while (isOnBoard(currR, currC)) {
-                    const target = currentBoard[currR][currC];
+                for (let i = 1; i < boardSize; i++) {
+                    const nr = r + dr * i;
+                    const nc = c + dc * i;
+                    if (!isOnBoard(nr, nc)) break;
+                    
+                    const target = currentBoard[nr][nc];
                     if (!target) {
-                        moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                    } else if (isEnemy(piece, target)) {
+                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                        break;
                     } else {
-                        if (isEnemy(piece, target)) {
-                            moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
-                        }
                         break;
                     }
-                    currR += dr; currC += dc;
                 }
             });
         }
 
-        function processBouncingBishops(r, c, directions, piece, currentBoard, moveList) {
+        function processBouncingBishops(r, c, directions, piece, currentBoard, moves) {
             directions.forEach(([dr, dc]) => {
-                let currR = r + dr, currC = c + dc, currentDr = dr, currentDc = dc, bounceCount = 0;
-                let stepsGuard = 0; 
-                while (bounceCount <= 2 && stepsGuard < 64) {
-                    stepsGuard++;
-                    let hitWall = false;
-                    
-                    if (currR < 0) { currentDr = 1; currR = 1; hitWall = true; }
-                    else if (currR >= boardSize) { currentDr = -1; currR = boardSize - 2; hitWall = true; }
-                    
-                    if (currC < 0) { currentDc = 1; currC = 1; hitWall = true; }
-                    else if (currC >= boardSize) { currentDc = -1; currC = boardSize - 2; hitWall = true; }
-                    
-                    if (hitWall) { 
-                        bounceCount++; 
-                        if (!isOnBoard(currR, currC)) break; 
-                    }
-
-                    const target = currentBoard[currR][currC];
+                let nr = r + dr, nc = c + dc;
+                while (isOnBoard(nr, nc)) {
+                    const target = currentBoard[nr][nc];
                     if (!target) {
-                        moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
+                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                    } else if (isEnemy(piece, target)) {
+                        moves.push({ fromR: r, fromC: c, toR: nr, toC: nc, type: 'normal' });
+                        break;
                     } else {
-                        if ((currR !== r || currC !== c) && isEnemy(piece, target)) {
-                            moveList.push({ fromR: r, fromC: c, toR: currR, toC: currC, type: 'normal' });
-                        }
                         break;
                     }
-                    currR += currentDr; currC += currentDc;
+                    
+                    if (nr + dr < 0 || nr + dr >= boardSize) dr = -dr;
+                    if (nc + dc < 0 || nc + dc >= boardSize) dc = -dc;
+                    nr += dr;
+                    nc += dc;
                 }
             });
         }
 
-        function isOnBoard(r, c) { return r >= 0 && r < boardSize && c >= 0 && c < boardSize; }
-        function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
+        function isOnBoard(r, c) {
+            return r >= 0 && r < boardSize && c >= 0 && c < boardSize;
+        }
 
-        function executeMove(targetBoard, move) {
-            const piece = targetBoard[move.fromR][move.fromC];
-            const originalSlipped = itemSlippedState[move.fromR][move.fromC];
-            
+        function isEnemy(piece1, piece2) {
+            const p1White = piece1 === piece1.toUpperCase();
+            const p2White = piece2 === piece2.toUpperCase();
+            return p1White !== p2White;
+        }
+
+        function executeMove(board, move) {
             if (move.type === 'swap') {
-                const targetPiece = targetBoard[move.toR][move.toC];
-                const targetSlipped = itemSlippedState[move.toR][move.toC];
-                
-                targetBoard[move.toR][move.toC] = piece;
-                targetBoard[move.fromR][move.fromC] = targetPiece;
-                
-                itemSlippedState[move.toR][move.toC] = originalSlipped;
-                itemSlippedState[move.fromR][move.fromC] = targetSlipped;
+                const temp = board[move.fromR][move.fromC];
+                board[move.fromR][move.fromC] = board[move.toR][move.toC];
+                board[move.toR][move.toC] = temp;
             } else {
-                targetBoard[move.toR][move.toC] = piece;
-                targetBoard[move.fromR][move.fromC] = '';
-                
-                itemSlippedState[move.fromR][move.fromC] = null;
-                if (iceLayout[move.toR][move.toC]) {
-                    itemSlippedState[move.toR][move.toC] = turn; 
-                } else {
-                    itemSlippedState[move.toR][move.toC] = null;
+                board[move.toR][move.toC] = board[move.fromR][move.fromC];
+                board[move.fromR][move.fromC] = '';
+            }
+
+            if (currentLevel === 6 || currentLevel === 10) {
+                if (iceLayout[move.toR][move.toC] && itemSlippedState[move.toR][move.toC] === null) {
+                    itemSlippedState[move.toR][move.toC] = 1;
                 }
             }
         }
 
-        function processSlipTurnRecovery(currentTurn) {
+        function processSlipTurnRecovery(turnColor) {
+            if (currentLevel !== 6 && currentLevel !== 10) return;
             for (let r = 0; r < boardSize; r++) {
                 for (let c = 0; c < boardSize; c++) {
-                    if (itemSlippedState[r][c] === currentTurn) {
-                        itemSlippedState[r][c] = null;
+                    const piece = board[r][c];
+                    if (piece) {
+                        const isWhite = piece === piece.toUpperCase();
+                        const isCorrectColor = (turnColor === 'w' && isWhite) || (turnColor === 'b' && !isWhite);
+                        if (isCorrectColor && itemSlippedState[r][c] !== null) {
+                            itemSlippedState[r][c] = null;
+                        }
                     }
                 }
             }
         }
 
         function checkGameEnd() {
-            let whiteKingFound = false;
-            let blackKingFound = false;
-            
-            for (let r = 0; r < boardSize; r++) {
-                for (let c = 0; c < boardSize; c++) {
-                    if (board[r][c] === 'K') whiteKingFound = true;
-                    if (board[r][c] === 'k') blackKingFound = true;
-                }
-            }
-            
-            if (!whiteKingFound || !blackKingFound) {
-                gameOver = true;
-                if (!whiteKingFound) {
-                    statusElem.textContent = "Black Wins by Regicide!";
-                    statusElem.style.color = "#e74c3c";
-                } else {
-                    statusElem.textContent = "White Wins by Regicide!";
-                    statusElem.style.color = "#2ecc71";
-                }
-                return true;
-            }
-            return false;
+            const kingExistsW = board.some(row => row.includes('K'));
+            const kingExistsB = board.some(row => row.includes('k'));
+            return !kingExistsW || !kingExistsB;
         }
 
         function activateReplayEngine() {
-            isReplaying = true;
-            replayIndex = gameHistory.length - 1;
             replayPanel.style.display = 'flex';
-            updateReplayView();
-        }
-
-        function updateReplayView() {
-            const currentSnapshot = gameHistory[replayIndex];
-            board = currentSnapshot.boardState.map(row => [...row]);
-            itemSlippedState = currentSnapshot.slippedState.map(row => [...row]);
-            turn = currentSnapshot.activeTurn;
-
-            drawBoard();
+            replayIndex = 0;
+            isReplaying = true;
+            updateReplayCounter();
             updateStatusMessage();
-
-            replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
-
-            btnFirst.disabled = (replayIndex === 0);
-            btnPrev.disabled = (replayIndex === 0);
-            btnNext.disabled = (replayIndex === gameHistory.length - 1);
-            btnLast.disabled = (replayIndex === gameHistory.length - 1);
         }
 
-        btnFirst.addEventListener('click', () => { replayIndex = 0; updateReplayView(); });
-        btnPrev.addEventListener('click', () => { if (replayIndex > 0) { replayIndex--; updateReplayView(); } });
-        btnNext.addEventListener('click', () => { if (replayIndex < gameHistory.length - 1) { replayIndex++; updateReplayView(); } });
-        btnLast.addEventListener('click', () => { replayIndex = gameHistory.length - 1; updateReplayView(); });
+        function updateReplayCounter() {
+            replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
+        }
 
-        initializeGame();
+        btnFirst.addEventListener('click', () => {
+            if (gameHistory.length === 0) return;
+            replayIndex = 0;
+            board = gameHistory[replayIndex].boardState.map(row => [...row]);
+            itemSlippedState = gameHistory[replayIndex].slippedState.map(row => [...row]);
+            turn = gameHistory[replayIndex].activeTurn;
+            updateReplayCounter();
+            drawBoard();
+        });
+
+        btnPrev.addEventListener('click', () => {
+            if (replayIndex > 0) {
+                replayIndex--;
+                board = gameHistory[replayIndex].boardState.map(row => [...row]);
+                itemSlippedState = gameHistory[replayIndex].slippedState.map(row => [...row]);
+                turn = gameHistory[replayIndex].activeTurn;
+                updateReplayCounter();
+                drawBoard();
+            }
+        });
+
+        btnNext.addEventListener('click', () => {
+            if (replayIndex < gameHistory.length - 1) {
+                replayIndex++;
+                board = gameHistory[replayIndex].boardState.map(row => [...row]);
+                itemSlippedState = gameHistory[replayIndex].slippedState.map(row => [...row]);
+                turn = gameHistory[replayIndex].activeTurn;
+                updateReplayCounter();
+                drawBoard();
+            }
+        });
+
+        btnLast.addEventListener('click', () => {
+            if (gameHistory.length === 0) return;
+            replayIndex = gameHistory.length - 1;
+            board = gameHistory[replayIndex].boardState.map(row => [...row]);
+            itemSlippedState = gameHistory[replayIndex].slippedState.map(row => [...row]);
+            turn = gameHistory[replayIndex].activeTurn;
+            updateReplayCounter();
+            drawBoard();
+        });
     </script>
 </body>
 </html>
