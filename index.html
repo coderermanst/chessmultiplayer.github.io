@@ -410,7 +410,7 @@
             pahoClient = new Paho.Client("broker.hivemq.com", 443, randClientStr);
 
             pahoClient.onMessageArrived = (message) => {
-                if (!isSearching) return;
+                if (!isSearching || dataConnection) return;
                 try {
                     const peerOffer = JSON.parse(message.payloadString);
                     if (peerOffer.id === myPeerId) return;
@@ -420,14 +420,20 @@
                     networkLog.textContent = "Stranger encountered! Binding sockets...";
                     matchedPeerIds.add(peerOffer.id);
                     
-                    // Always attempt connection with a slight delay for reliability
-                    setTimeout(() => {
-                        if (!isSearching || dataConnection) return;
-                        myPlayerColor = 'b'; 
-                        cleanupMatchmaking();
-                        dataConnection = peer.connect(peerOffer.id);
-                        hookNetworkEvents();
-                    }, myPeerId > peerOffer.id ? 100 : 300); 
+                    // FIX: Only the peer with the HIGHER ID initiates connection
+                    // This prevents both peers from trying to connect
+                    const shouldInitiateConnection = myPeerId > peerOffer.id;
+                    
+                    if (shouldInitiateConnection) {
+                        setTimeout(() => {
+                            if (!isSearching || dataConnection) return;
+                            myPlayerColor = 'b'; 
+                            cleanupMatchmaking();
+                            dataConnection = peer.connect(peerOffer.id);
+                            hookNetworkEvents();
+                        }, 100); 
+                    }
+                    // If myPeerId < peerOffer.id, we wait for them to connect to us
                 } catch (err) {
                     console.error("Matchmaking parse error:", err);
                 }
@@ -998,11 +1004,12 @@
                             const targetPiece = currentBoard[tr][tc];
                             if (!targetPiece) continue;
                             if (isEnemy(piece, targetPiece)) continue;
-                            if (targetPiece.toLowerCase() === 'g' || targetPiece.toLowerCase() === 'k') continue;
-                            
-                            const guardianR = isWhite ? tr - 1 : tr + 1;
-                            if (isOnBoard(guardianR, tc) && !currentBoard[guardianR][tc]) {
-                                moves.push({ fromR: r, fromC: c, toR: guardianR, toC: tc, type: 'normal' });
+                            const dx = tc - c, dy = tr - r;
+                            if (dx === 0 && dy !== 0) {
+                                const guardianStepDir = dy > 0 ? 1 : -1;
+                                if (isOnBoard(r + guardianStepDir, c) && !currentBoard[r + guardianStepDir][c]) {
+                                    moves.push({ fromR: r, fromC: c, toR: r + guardianStepDir, toC: c, type: 'normal' });
+                                }
                             }
                         }
                     }
@@ -1013,15 +1020,42 @@
 
         function processSlidingMoves(r, c, dirs, piece, currentBoard, moves) {
             dirs.forEach(([dr, dc]) => {
-                for (let d = 1; d < boardSize; d++) {
-                    const targetR = r + dr * d, targetC = c + dc * d;
-                    if (!isOnBoard(targetR, targetC)) break;
-                    const target = currentBoard[targetR][targetC];
-                    if (!target) {
-                        moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
-                    } else {
-                        if (isEnemy(piece, target)) {
-                            moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
+                for (let i = 1; i < boardSize; i++) {
+                    const newR = r + dr * i, newC = c + dc * i;
+                    if (!isOnBoard(newR, newC)) break;
+                    const target = currentBoard[newR][newC];
+                    if (target) {
+                        if (isEnemy(piece, target)) moves.push({ fromR: r, fromC: c, toR: newR, toC: newC, type: 'normal' });
+                        break;
+                    }
+                    moves.push({ fromR: r, fromC: c, toR: newR, toC: newC, type: 'normal' });
+                }
+            });
+        }
+
+        function processBouncingBishops(r, c, dirs, piece, currentBoard, moves) {
+            dirs.forEach(([dr, dc]) => {
+                let curR = r + dr, curC = c + dc;
+                while (isOnBoard(curR, curC)) {
+                    const target = currentBoard[curR][curC];
+                    if (target) {
+                        if (isEnemy(piece, target)) moves.push({ fromR: r, fromC: c, toR: curR, toC: curC, type: 'normal' });
+                        break;
+                    }
+                    moves.push({ fromR: r, fromC: c, toR: curR, toC: curC, type: 'normal' });
+                    curR += dr; curC += dc;
+                    if (!isOnBoard(curR, curC)) {
+                        curR -= dr * 2; curC -= dc * 2;
+                        dr = -dr; dc = -dc;
+                        while (isOnBoard(curR, curC)) {
+                            const bounceTarget = currentBoard[curR][curC];
+                            if (bounceTarget) {
+                                if (isEnemy(piece, bounceTarget)) moves.push({ fromR: r, fromC: c, toR: curR, toC: curC, type: 'normal' });
+                                break;
+                            }
+                            moves.push({ fromR: r, fromC: c, toR: curR, toC: curC, type: 'normal' });
+                            curR += dr; curC += dc;
+                            if (!isOnBoard(curR, curC)) break;
                         }
                         break;
                     }
@@ -1029,137 +1063,98 @@
             });
         }
 
-        function processBouncingBishops(r, c, dirs, piece, currentBoard, moves) {
-            dirs.forEach(([dr, dc]) => {
-                let pr = r, pc = c;
-                for (let bounces = 0; bounces < 2; bounces++) {
-                    let moved = false;
-                    for (let d = 1; d < boardSize; d++) {
-                        const targetR = pr + dr * d, targetC = pc + dc * d;
-                        if (!isOnBoard(targetR, targetC)) break;
-                        const target = currentBoard[targetR][targetC];
-                        if (!target) {
-                            moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
-                            moved = true;
-                        } else {
-                            if (isEnemy(piece, target)) {
-                                moves.push({ fromR: r, fromC: c, toR: targetR, toC: targetC, type: 'normal' });
-                            }
-                            break;
-                        }
-                    }
-                    if (!moved || bounces >= 1) break;
-                    if (pr + dr < 0 || pr + dr >= boardSize) dr = -dr;
-                    if (pc + dc < 0 || pc + dc >= boardSize) dc = -dc;
-                    pr += dr; pc += dc;
-                }
-            });
+        function isOnBoard(r, c) {
+            return r >= 0 && r < boardSize && c >= 0 && c < boardSize;
         }
 
-        function isOnBoard(r, c) { return r >= 0 && r < boardSize && c >= 0 && c < boardSize; }
-        function isEnemy(p1, p2) { return (p1 === p1.toUpperCase()) !== (p2 === p2.toUpperCase()); }
+        function isEnemy(piece1, piece2) {
+            const isWhite1 = piece1 === piece1.toUpperCase();
+            const isWhite2 = piece2 === piece2.toUpperCase();
+            return isWhite1 !== isWhite2;
+        }
 
-        function executeMove(tempBoard, move) {
-            const piece = tempBoard[move.fromR][move.fromC];
-            tempBoard[move.toR][move.toC] = piece;
-            tempBoard[move.fromR][move.fromC] = '';
-
-            if (move.type === 'swap' && currentLevel === 7) {
-                const swappedPiece = tempBoard[move.toR][move.toC];
-                tempBoard[move.toR][move.toC] = piece;
-                tempBoard[move.fromR][move.fromC] = swappedPiece;
-            }
-
-            if (iceLayout[move.toR][move.toC]) {
-                itemSlippedState[move.toR][move.toC] = 1;
+        function executeMove(currentBoard, move) {
+            if (move.type === 'swap') {
+                [currentBoard[move.fromR][move.fromC], currentBoard[move.toR][move.toC]] = 
+                [currentBoard[move.toR][move.toC], currentBoard[move.fromR][move.fromC]];
+            } else {
+                currentBoard[move.toR][move.toC] = currentBoard[move.fromR][move.fromC];
+                currentBoard[move.fromR][move.fromC] = '';
             }
             itemSlippedState[move.fromR][move.fromC] = null;
+            if (iceLayout[move.toR][move.toC]) {
+                itemSlippedState[move.toR][move.toC] = { onIce: true };
+            }
         }
 
-        function processSlipTurnRecovery(turn) {
+        function processSlipTurnRecovery(playerTurn) {
             for (let r = 0; r < boardSize; r++) {
                 for (let c = 0; c < boardSize; c++) {
-                    if (itemSlippedState[r][c] !== null) {
-                        const pieceAtCell = board[r][c];
-                        const isWhitePiece = pieceAtCell && pieceAtCell === pieceAtCell.toUpperCase();
-                        const pieceBelongsToTurn = (turn === 'w' && isWhitePiece) || (turn === 'b' && !isWhitePiece);
-                        if (pieceBelongsToTurn) {
-                            itemSlippedState[r][c] += 1;
-                            if (itemSlippedState[r][c] > 1) {
-                                itemSlippedState[r][c] = null;
-                            }
-                        }
+                    const piece = board[r][c];
+                    if (!piece) continue;
+                    const isWhite = piece === piece.toUpperCase();
+                    if ((playerTurn === 'w' && !isWhite) || (playerTurn === 'b' && isWhite)) continue;
+                    if (itemSlippedState[r][c] && itemSlippedState[r][c].onIce) {
+                        itemSlippedState[r][c] = null;
                     }
                 }
             }
         }
 
         function checkGameEnd() {
+            const kingToFind = turn === 'w' ? 'k' : 'K';
             for (let r = 0; r < boardSize; r++) {
                 for (let c = 0; c < boardSize; c++) {
-                    const piece = board[r][c];
-                    if (piece && piece.toLowerCase() === 'k') {
-                        const isWhitePiece = piece === piece.toUpperCase();
-                        const isMyKing = (myPlayerColor === 'w' && isWhitePiece) || (myPlayerColor === 'b' && !isWhitePiece);
-                        if (isMyKing) return false;
-                    }
+                    if (board[r][c] === kingToFind) return false;
                 }
             }
+            statusElem.textContent = (turn === 'w' ? 'White' : 'Black') + " King captured. " + (turn === 'w' ? 'Black' : 'White') + " wins!";
+            statusElem.style.color = "#f39c12";
             return true;
         }
 
         function activateReplayEngine() {
-            gameOver = true;
-            statusElem.textContent = "Checkmate! Game Over. Review your moves below.";
-            statusElem.style.color = "#f1c40f";
             replayPanel.style.display = 'flex';
-            replayIndex = 0;
-            updateReplayDisplay();
-        }
-
-        function updateReplayDisplay() {
-            replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
-            btnFirst.disabled = replayIndex === 0;
-            btnPrev.disabled = replayIndex === 0;
-            btnNext.disabled = replayIndex === gameHistory.length - 1;
-            btnLast.disabled = replayIndex === gameHistory.length - 1;
+            isReplaying = true;
+            updateStatusMessage();
         }
 
         btnFirst.addEventListener('click', () => {
             replayIndex = 0;
-            loadReplayState();
+            updateReplayBoard();
         });
 
         btnPrev.addEventListener('click', () => {
             if (replayIndex > 0) {
                 replayIndex--;
-                loadReplayState();
+                updateReplayBoard();
             }
         });
 
         btnNext.addEventListener('click', () => {
             if (replayIndex < gameHistory.length - 1) {
                 replayIndex++;
-                loadReplayState();
+                updateReplayBoard();
             }
         });
 
         btnLast.addEventListener('click', () => {
             replayIndex = gameHistory.length - 1;
-            loadReplayState();
+            updateReplayBoard();
         });
 
-        function loadReplayState() {
-            if (replayIndex >= 0 && replayIndex < gameHistory.length) {
-                const state = gameHistory[replayIndex];
-                board = state.boardState.map(row => [...row]);
-                itemSlippedState = state.slippedState.map(row => [...row]);
-                turn = state.activeTurn;
-                isReplaying = true;
-                updateStatusMessage();
-                drawBoard();
-                updateReplayDisplay();
-            }
+        function updateReplayBoard() {
+            btnFirst.disabled = replayIndex === 0;
+            btnPrev.disabled = replayIndex === 0;
+            btnNext.disabled = replayIndex >= gameHistory.length - 1;
+            btnLast.disabled = replayIndex >= gameHistory.length - 1;
+
+            const historyState = gameHistory[replayIndex];
+            board = historyState.boardState.map(row => [...row]);
+            itemSlippedState = historyState.slippedState.map(row => [...row]);
+            turn = historyState.activeTurn;
+            replayCounter.textContent = `Reviewing Move: ${replayIndex} / ${gameHistory.length - 1}`;
+            drawBoard();
         }
     </script>
 </body>
