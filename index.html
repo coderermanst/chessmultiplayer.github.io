@@ -3,132 +3,267 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Variant Chess Engine - Online Multiplayer</title>
-    <!-- Include PeerJS for WebRTC Peer-to-Peer Multiplayer Connection -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <title>Take King Chess - Online Multiplayer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #2c3e50;
-            color: #ecf0f1;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            background-color: #2c3e50;
+            color: #ecf0f1;
             margin: 0;
-        }
-        #ui-panel {
-            margin-bottom: 15px;
-            text-align: center;
-            background: #34495e;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-        #status {
-            font-size: 1.2rem;
-            font-weight: bold;
-            margin: 10px 0;
-            min-height: 24px;
-        }
-        #board-container {
-            position: relative;
-            margin: 20px auto;
-        }
-        #board {
-            display: grid;
-            border: 4px solid #1a252f;
-            border-radius: 4px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 20px;
             user-select: none;
         }
+        h1 { margin-bottom: 5px; }
+        p { margin-top: 0; color: #bdc3c7; text-align: center; max-width: 500px;}
+        
+        #lobby-panel {
+            background-color: #2c3e50;
+            border: 2px dashed #3498db;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            width: 520px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .lobby-row {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin: 8px 0;
+            align-items: center;
+        }
+        input {
+            padding: 8px;
+            border-radius: 4px;
+            border: none;
+            width: 200px;
+            font-size: 0.9rem;
+            background: #ecf0f1;
+            color: #2c3e50;
+        }
+        button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:hover { background-color: #2980b9; }
+        
+        #random-match-btn {
+            background-color: #e67e22;
+            width: 100%;
+            margin-top: 5px;
+        }
+        #random-match-btn:hover { background-color: #d35400; }
+        #random-match-btn:disabled { background-color: #7f8c8d; cursor: not-allowed; }
+
+        #my-id-display {
+            font-weight: bold;
+            color: #2ecc71;
+            background: #34495e;
+            padding: 3px 8px;
+            border-radius: 4px;
+            user-select: text; 
+        }
+
+        #level-container {
+            background-color: #34495e;
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            text-align: center;
+            width: 520px;
+            box-sizing: border-box;
+        }
+        #level-slider {
+            width: 100%;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+        #level-slider:disabled { opacity: 0.4; cursor: not-allowed; }
+        #level-desc {
+            font-size: 0.95rem;
+            color: #f1c40f;
+            min-height: 40px;
+            font-weight: bold;
+        }
+
+        #status {
+            font-size: 1.3rem;
+            margin-bottom: 15px;
+            font-weight: bold;
+            color: #2ecc71;
+            background-color: #34495e;
+            padding: 6px 20px;
+            border-radius: 4px;
+        }
+        
+        #board-wrapper {
+            position: relative;
+        }
+
+        #chessboard {
+            display: grid;
+            border: 5px solid #34495e;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+            transition: transform 0.5s ease;
+        }
+        
+        .flipped-board {
+            transform: rotate(180deg);
+        }
+
+        #arrow-svg {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         .cell {
             width: 60px;
             height: 60px;
             display: flex;
             justify-content: center;
             align-items: center;
+            font-size: 38px;
+            cursor: pointer;
             position: relative;
-            box-sizing: border-box;
         }
-        .light { background-color: #f0d9b5; }
-        .dark { background-color: #b58863; }
-        .cell.slippery {
-            background-color: #74b9ff !important;
-            box-shadow: inset 0 0 15px rgba(255,255,255,0.6);
+        .light { background-color: #e0e4e8; }
+        .dark { background-color: #88929a; }
+        
+        .slippery::after {
+            content: '🧊';
+            font-size: 12px;
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            opacity: 0.7;
+            z-index: 1;
         }
-        .cell.selected {
-            box-shadow: inset 0 0 0 4px #f1c40f;
+        .slipped-piece {
+            opacity: 0.4 !important;
+            filter: grayscale(100%) contrast(150%) drop-shadow(0px 0px 8px #3498db) !important;
         }
-        .cell.highlighted::after {
+
+        .piece {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            cursor: grab;
+            position: relative;
+            transform: translate(0, 0);
+        }
+        .piece:active { cursor: grabbing; }
+        
+        .flipped-board .piece {
+            transform: rotate(180deg);
+        }
+        
+        .piece-w { color: #ffffff; filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.75)); }
+        .piece-b { color: #111111; filter: drop-shadow(0px 2px 2px rgba(255,255,255,0.2)); }
+        
+        .selected { background-color: #2ecc71 !important; }
+        .highlighted::before {
             content: '';
-            width: 18px;
-            height: 18px;
+            width: 16px;
+            height: 16px;
             background-color: rgba(46, 204, 113, 0.6);
             border-radius: 50%;
-            pointer-events: none;
-        }
-        .piece {
-            font-size: 42px;
-            cursor: pointer;
-            z-index: 2;
-            transition: transform 0.1s ease;
-        }
-        .piece-w { color: #ffffff; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.7)); }
-        .piece-b { color: #000000; filter: drop-shadow(0 2px 2px rgba(255,255,255,0.3)); }
-        .slipped-piece {
-            filter: opacity(0.6) grayscale(50%) blur(0.5px);
-        }
-        #arrow-svg {
             position: absolute;
-            top: 0;
-            left: 0;
+            z-index: 2;
             pointer-events: none;
-            z-index: 10;
         }
+
         #replay-panel {
             display: none;
-            gap: 10px;
-            margin-top: 15px;
+            flex-direction: column;
             align-items: center;
+            background-color: #34495e;
+            border: 2px dashed #f1c40f;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            width: 520px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            box-sizing: border-box;
         }
-        button {
-            background-color: #3498db;
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            font-size: 14px;
+        .replay-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .replay-btn {
+            padding: 8px 16px;
             border-radius: 4px;
             cursor: pointer;
             font-weight: bold;
+            background-color: #2c3e50;
+            color: #f1c40f;
+            border: 1px solid #f1c40f;
         }
-        button:hover:not(:disabled) { background-color: #2980b9; }
-        button:disabled { background-color: #7f8c8d; cursor: not-allowed; }
-        #peer-id-display {
-            font-size: 0.85rem;
-            color: #bdc3c7;
-            margin-top: 5px;
+        .replay-btn:hover:not(:disabled) {
+            background-color: #f1c40f;
+            color: #2c3e50;
+        }
+        .replay-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: #7f8c8d;
+            color: #7f8c8d;
+        }
+        #replay-counter {
+            font-size: 1rem;
+            font-weight: bold;
+            color: #ecf0f1;
         }
     </style>
 </head>
-<body>
+<body oncontextmenu="return false;">
 
-    <div id="ui-panel">
-        <div>
-            <label for="level-slider">Game Variant Level: </label>
-            <input type="range" id="level-slider" min="1" max="10" value="1">
-            <span id="level-val">1</span>
+    <h1>Take King Chess (Online Multiplayer)</h1>
+    <p>Move into danger freely. Match a stranger or input your friend's room ID. Right-click and drag to create strategic layout arrows.</p>
+    
+    <div id="lobby-panel">
+        <div class="lobby-row">
+            <span>Your Game Room ID: </span>
+            <span id="my-id-display">Connecting to network...</span>
         </div>
-        <div id="level-desc" style="font-size: 0.9rem; color: #bdc3c7; margin-top: 5px;">Standard Chess Rules</div>
-        <div id="status">Connecting to matchmaking network...</div>
-        <div id="peer-id-display">Your ID: Fetching...</div>
-        <div style="margin-top: 10px; display: flex; gap: 10px; justify-content: center;">
-            <button id="host-btn">Invite a Friend (Copy Link)</button>
-            <button id="match-btn" disabled>Match with Random Stranger</button>
+        <div class="lobby-row">
+            <input type="text" id="peer-id-input" placeholder="Paste Opponent's Room ID here...">
+            <button id="connect-btn">Connect & Play</button>
         </div>
+        <div class="lobby-row">
+            <button id="random-match-btn" disabled>Match with Stranger (Level 1)</button>
+        </div>
+        <div id="network-log" style="color: #f1c40f; font-size: 0.9rem; margin-top:5px;">Initializing peer node network...</div>
     </div>
 
-    <div id="board-container">
+    <div id="level-container">
+        <label for="level-slider" style="font-weight: bold; font-size: 1.1rem;">Game Rule Level: <span id="level-val">1</span></label>
+        <input type="range" id="level-slider" min="1" max="10" value="1">
+        <div id="level-desc">Level 1: Normal Chess. Standard movement rules apply.</div>
+    </div>
+
+    <div id="status">Awaiting Network Connection...</div>
+    
+    <div id="board-wrapper">
+        <div id="chessboard"></div>
         <svg id="arrow-svg">
             <defs>
                 <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="6" refY="3.5" orient="auto">
@@ -136,171 +271,82 @@
                 </marker>
             </defs>
         </svg>
-        <div id="board"></div>
     </div>
 
     <div id="replay-panel">
-        <button id="btn-first">|&lt;</button>
-        <button id="btn-prev">&lt;</button>
-        <span id="replay-counter">Reviewing Move: 0 / 0</span>
-        <button id="btn-next">&gt;</button>
-        <button id="btn-last">&gt;|</button>
+        <div id="replay-counter">Reviewing Move: 0 / 0</div>
+        <div class="replay-buttons">
+            <button class="replay-btn" id="btn-first">Local Replay First</button>
+            <button class="replay-btn" id="btn-prev">◀ Back</button>
+            <button class="replay-btn" id="btn-next">Next ▶</button>
+            <button class="replay-btn" id="btn-last">Last ⏭</button>
+        </div>
     </div>
 
     <script>
-        // DOM Elements
-        const boardElem = document.getElementById('board');
-        const arrowSvg = document.getElementById('arrow-svg');
+        const boardElem = document.getElementById('chessboard');
         const statusElem = document.getElementById('status');
         const levelSlider = document.getElementById('level-slider');
         const levelValDisplay = document.getElementById('level-val');
         const levelDescDisplay = document.getElementById('level-desc');
-        const randomMatchBtn = document.getElementById('match-btn');
-        const hostBtn = document.getElementById('host-btn');
-        const peerIdDisplay = document.getElementById('peer-id-display');
+        
+        const myIdDisplay = document.getElementById('my-id-display');
+        const peerIdInput = document.getElementById('peer-id-input');
+        const connectBtn = document.getElementById('connect-btn');
+        const randomMatchBtn = document.getElementById('random-match-btn');
+        const networkLog = document.getElementById('network-log');
+        const arrowSvg = document.getElementById('arrow-svg');
+
         const replayPanel = document.getElementById('replay-panel');
+        const replayCounter = document.getElementById('replay-counter');
         const btnFirst = document.getElementById('btn-first');
         const btnPrev = document.getElementById('btn-prev');
         const btnNext = document.getElementById('btn-next');
         const btnLast = document.getElementById('btn-last');
-        const replayCounter = document.getElementById('replay-counter');
-
-        // Engine State Variables
-        let boardSize = 8;
-        let currentLevel = 1;
-        let board = [];
-        let turn = 'w';
-        let selected = null;
-        let gameOver = false;
-        let isReplaying = false;
-        let isAnimating = false;
-        let activeArrows = [];
-        let gameHistory = [];
-        let replayIndex = 0;
-        let drawingStartCell = null;
-        
-        let itemSlippedState = [];
-        let iceLayout = [];
-        
-        // Multiplayer Networking Variables
-        let peer = null;
-        let dataConnection = null;
-        let myPlayerColor = null; // Will become 'w' or 'b' when matched
 
         const symbols = {
-            'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'g': '🗿', 'p': '♟',
-            'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'G': '🗿', 'P': '♙'
+            'P': '♙', 'R': '♖', 'N': '♘', 'B': '♗', 'Q': '♕', 'K': '♔', 'G': '🛡️',
+            'p': '♟', 'r': '♜', 'n': '♞', 'b': '♝', 'q': '♛', 'k': '♚', 'g': '🛡️'
         };
+
+        let currentLevel = 1;
+        let myPlayerColor = null; 
+        let dataConnection = null; 
+        let myPeerId = null;
+        let pahoClient = null;
+        let isSearching = false;
+        let heartbeatInterval = null;
+        let currentMqttTopic = "";
 
         const levelDescriptions = {
-            1: "Standard Chess Rules",
-            2: "Goblin Pawns: Pawns move and strike dynamically across vectors.",
-            3: "Empowered Queens: Queens hold standard Knight attack steps.",
-            4: "Heavy Artillery Rooks: Rooks can hop target squares like standard Knights.",
-            5: "Bouncing Bishops: Bishops ricochet off the walls up to two times.",
-            6: "Glacial Slip: Centers contain patches of ice freezing pieces for 1 turn.",
-            7: "Royal Decoy: Kings may swap locations with friendly non-royal entities.",
-            8: "Centaur Knights: Knights leap double their normal operational limits.",
-            9: "Grand Theater: Expanded 10x10 board containing Royal Guardians ('g').",
-            10: "Ragnarok Chaos: All variants combined on a frosty 10x10 grid."
+            1: "Level 1: Normal Chess. Standard movement rules apply.",
+            2: "Level 2: Goblin Pawns! Pawns move 1 or 2 squares forward or diagonally, jumping completely over obstacles.",
+            3: "Level 3: Horse Queens. The traditional Queen transforms completely into an agile Knight-Queen compound construct.",
+            4: "Level 4: Phantom Rooks. Heavy Siege Castles gain the dimensional ability to jump obstacles natively like Knights.",
+            5: "Level 5: Kinetic Bishops. Clergy track vectors that rebound off the boundaries of the board matrix to bank paths.",
+            6: "Level 6: Perilous Ice. Random tiles look slippery. Landing freezes pieces: they cannot capture and require 1 turn to stabilize.",
+            7: "Level 7: Sovereign Swap. The Monarch rules space, enjoying capability to swap coordinate matrices safely with any ally.",
+            8: "Level 8: Blitz Chargers. Horses harness double energy output, allowing them to jump twice as far as traditional Knights.",
+            9: "Level 9: The Grand Arena. Grid size safely expands to 10x10. Introduces the Guardian (G), who drops out of nowhere directly in front of your own pieces.",
+            10: "Level 10: Absolute Armageddon! All structural rules, variant configurations, and size scales mesh into one singular sandbox."
         };
 
-        // Initialize PeerJS Connection
-        function initNetwork() {
-            // Generate a cleanly identifiable room/peer prefix or unique link setup
-            peer = new Peer();
+        let board = [];
+        let boardSize = 8;
+        let itemSlippedState = [];
+        let iceLayout = [];
 
-            peer.on('open', (id) => {
-                peerIdDisplay.textContent = `Your Connect ID: ${id}`;
-                randomMatchBtn.disabled = false;
-                
-                // Parse URL params to see if we've been invited by a friend
-                const urlParams = new URLSearchParams(window.location.search);
-                const joinId = urlParams.get('join');
-                if (joinId) {
-                    statusElem.textContent = "Connecting to friend...";
-                    connectToPeer(joinId, 'b'); // Joiner is Black
-                } else {
-                    statusElem.textContent = "Ready. Adjust settings or invite an opponent.";
-                }
-            });
+        let turn = 'w'; 
+        let selected = null; 
+        let gameOver = false;
+        let isAnimating = false; 
 
-            peer.on('connection', (conn) => {
-                if (dataConnection) {
-                    conn.close(); // Reject if already in a game
-                    return;
-                }
-                dataConnection = conn;
-                myPlayerColor = 'w'; // Host defaults to White
-                setupConnectionListeners();
-                statusElem.textContent = "Opponent connected! Game starting...";
-                
-                // Sync current game settings to client
-                sendDataPayload({ type: 'SYNC_SETTINGS', level: currentLevel });
-                initializeGame();
-            });
+        let activeArrows = [];
+        let drawingStartCell = null;
 
-            peer.on('error', (err) => {
-                console.error(err);
-                statusElem.textContent = "Connection error occurred.";
-            });
-        }
-
-        function connectToPeer(targetId, assignedColor) {
-            dataConnection = peer.connect(targetId);
-            myPlayerColor = assignedColor;
-            setupConnectionListeners();
-        }
-
-        function setupConnectionListeners() {
-            dataConnection.on('open', () => {
-                statusElem.textContent = "Connected! Setting up match...";
-            });
-
-            dataConnection.on('data', (data) => {
-                if (data.type === 'SYNC_SETTINGS') {
-                    currentLevel = data.level;
-                    levelSlider.value = currentLevel;
-                    levelValDisplay.textContent = currentLevel;
-                    levelDescDisplay.textContent = levelDescriptions[currentLevel];
-                    initializeGame();
-                }
-                if (data.type === 'MOVE_EXECUTE') {
-                    processSlipTurnRecovery(turn);
-                    animateAndExecuteMove(data.move);
-                }
-            });
-
-            dataConnection.on('close', () => {
-                statusElem.textContent = "Opponent disconnected.";
-                dataConnection = null;
-                myPlayerColor = null;
-            });
-        }
-
-        function sendDataPayload(obj) {
-            if (dataConnection && dataConnection.open) {
-                dataConnection.send(obj);
-            }
-        }
-
-        // Host button click (Direct room creation)
-        hostBtn.addEventListener('click', () => {
-            if (!peer || !peer.id) return;
-            const inviteUrl = `${window.location.origin}${window.location.pathname}?join=${peer.id}`;
-            navigator.clipboard.writeText(inviteUrl).then(() => {
-                statusElem.textContent = "Invite link copied! Send it to your friend.";
-            });
-        });
-
-        // Basic matchmaking simulation fallback / Random ID search instructions
-        randomMatchBtn.addEventListener('click', () => {
-            const promptId = prompt("Enter your opponent's Connect ID to join them directly:");
-            if (promptId) {
-                statusElem.textContent = "Connecting to target peer...";
-                connectToPeer(promptId.trim(), 'b');
-            }
-        });
+        let gameHistory = [];
+        let replayIndex = 0;
+        let isReplaying = false;
 
         function saveHistoryState() {
             gameHistory.push({
@@ -310,7 +356,179 @@
             });
         }
 
-        window.addEventListener('contextmenu', e => e.preventDefault());
+        const peer = new Peer();
+
+        peer.on('open', (id) => {
+            myPeerId = id;
+            myIdDisplay.textContent = id;
+            randomMatchBtn.disabled = false;
+            networkLog.textContent = "Ready. Share your Room ID, or click 'Match with Stranger'!";
+        });
+
+        peer.on('connection', (incomingConn) => {
+            if (dataConnection) {
+                incomingConn.close();
+                return; 
+            }
+            dataConnection = incomingConn;
+            myPlayerColor = 'w'; 
+            cleanupMatchmaking();
+            disableLevelSelection();
+            hookNetworkEvents();
+        });
+
+        connectBtn.addEventListener('click', () => {
+            const targetId = peerIdInput.value.trim();
+            if (!targetId || targetId === myPeerId) return;
+            
+            networkLog.textContent = "Connecting to peer host matrix...";
+            myPlayerColor = 'b'; 
+            cleanupMatchmaking();
+            disableLevelSelection();
+            
+            dataConnection = peer.connect(targetId);
+            hookNetworkEvents();
+        });
+
+        randomMatchBtn.addEventListener('click', () => {
+            if (isSearching) {
+                cleanupMatchmaking();
+                networkLog.textContent = "Matchmaking canceled.";
+                return;
+            }
+
+            isSearching = true;
+            randomMatchBtn.textContent = "Cancel Search...";
+            connectBtn.disabled = true;
+            peerIdInput.disabled = true;
+            disableLevelSelection();
+            networkLog.textContent = `Searching for a stranger playing Level ${currentLevel}...`;
+
+            const randClientStr = "client_" + Math.random().toString(36).substring(2, 10);
+            pahoClient = new Paho.Client("broker.hivemq.com", 443, randClientStr);
+
+            pahoClient.onMessageArrived = (message) => {
+                if (!isSearching) return;
+                try {
+                    const peerOffer = JSON.parse(message.payloadString);
+                    if (peerOffer.id === myPeerId) return;
+                    if (Date.now() - peerOffer.timestamp > 6000) return;
+
+                    networkLog.textContent = "Stranger encountered! Binding sockets...";
+                    
+                    if (myPeerId > peerOffer.id) {
+                        cleanupMatchmaking();
+                        setTimeout(() => {
+                            if (dataConnection) return; 
+                            myPlayerColor = 'b'; 
+                            dataConnection = peer.connect(peerOffer.id);
+                            hookNetworkEvents();
+                        }, 600); 
+                    }
+                } catch (err) {
+                    console.error("Matchmaking parse error:", err);
+                }
+            };
+
+            pahoClient.connect({
+                onSuccess: () => {
+                    if (!isSearching) return;
+                    currentMqttTopic = `take_king_chess_match_lvl_${currentLevel}`;
+                    pahoClient.subscribe(currentMqttTopic);
+                    broadcastPresence();
+
+                    heartbeatInterval = setInterval(() => {
+                        broadcastPresence();
+                    }, 2500);
+                },
+                onFailure: (err) => {
+                    console.error("MQTT Connection failed:", err);
+                    networkLog.textContent = "Lobby server connection failed. Retrying...";
+                    cleanupMatchmaking();
+                },
+                useSSL: true
+            });
+        });
+
+        function broadcastPresence() {
+            if (pahoClient && pahoClient.isConnected()) {
+                const lobbyPing = JSON.stringify({ id: myPeerId, timestamp: Date.now() });
+                const message = new Paho.Message(lobbyPing);
+                message.destinationName = currentMqttTopic;
+                pahoClient.send(message);
+            }
+        }
+
+        function disableLevelSelection() {
+            levelSlider.disabled = true;
+        }
+
+        function cleanupMatchmaking() {
+            isSearching = false;
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+            randomMatchBtn.textContent = `Match with Stranger (Level ${currentLevel})`;
+            randomMatchBtn.disabled = (myPlayerColor !== null);
+            connectBtn.disabled = (myPlayerColor !== null);
+            peerIdInput.disabled = (myPlayerColor !== null);
+            if (pahoClient) {
+                try {
+                    if (pahoClient.isConnected()) pahoClient.disconnect();
+                } catch(e) {}
+                pahoClient = null;
+            }
+        }
+
+        function hookNetworkEvents() {
+            if (!dataConnection) return;
+
+            dataConnection.on('open', () => {
+                networkLog.textContent = `Connected! Playing Level ${currentLevel}.`;
+                networkLog.style.color = "#2ecc71";
+                cleanupMatchmaking();
+                disableLevelSelection();
+                
+                if (myPlayerColor === 'b') {
+                    boardElem.classList.add('flipped-board');
+                } else {
+                    boardElem.classList.remove('flipped-board');
+                }
+
+                if (myPlayerColor === 'w') {
+                    sendDataPayload({ type: 'RULE_SYNC', level: currentLevel });
+                }
+                initializeGame();
+            });
+
+            dataConnection.on('data', (payload) => {
+                if (payload.type === 'RULE_SYNC') {
+                    currentLevel = payload.level;
+                    levelSlider.value = currentLevel;
+                    levelValDisplay.textContent = currentLevel;
+                    levelDescDisplay.textContent = levelDescriptions[currentLevel];
+                    disableLevelSelection();
+                    initializeGame();
+                }
+                else if (payload.type === 'MOVE_EXECUTE') {
+                    processSlipTurnRecovery(turn);
+                    animateAndExecuteMove(payload.move);
+                }
+            });
+
+            dataConnection.on('close', () => {
+                networkLog.textContent = "Connection lost. Opponent left.";
+                networkLog.style.color = "#e74c3c";
+                gameOver = true;
+            });
+        }
+
+        function sendDataPayload(obj) {
+            if (dataConnection && dataConnection.open) {
+                dataConnection.send(obj);
+            }
+        }
 
         function initializeGame() {
             boardSize = (currentLevel === 9 || currentLevel === 10) ? 10 : 8;
@@ -338,14 +556,14 @@
                 ];
             } else {
                 board = [
-                    ['r','n','b','q','k','b','n','g'],
+                    ['r','n','b','q','k','b','n','r'],
                     ['p','p','p','p','p','p','p','p'],
                     ['','','','','','','',''],
                     ['','','','','','','',''],
                     ['','','','','','','',''],
                     ['','','','','','','',''],
                     ['P','P','P','P','P','P','P','P'],
-                    ['R','N','B','Q','K','B','N','G']
+                    ['R','N','B','Q','K','B','N','R']
                 ];
             }
 
@@ -380,36 +598,32 @@
             }
             if (gameOver) return;
             if (!myPlayerColor) {
-                statusElem.textContent = "Waiting for an opponent to link up...";
+                statusElem.textContent = "Connect to start game";
                 return;
             }
             let turnTxt = (turn === 'w') ? "White's Turn" : "Black's Turn";
             let identityTxt = (turn === myPlayerColor) ? " (Your Move!)" : " (Opponent's Move...)";
             statusElem.textContent = turnTxt + identityTxt;
-            statusElem.style.color = (turn === myPlayerColor) ? "#2ecc71" : "#e74c3c";
+            statusElem.style.color = "#2ecc71";
         }
 
         function drawBoard() {
             boardElem.innerHTML = '';
             for (let r = 0; r < boardSize; r++) {
                 for (let c = 0; c < boardSize; c++) {
-                    // Visual inversion for Black player perspective
-                    let renderR = (myPlayerColor === 'b') ? (boardSize - 1 - r) : r;
-                    let renderC = (myPlayerColor === 'b') ? (boardSize - 1 - c) : c;
-
                     const cell = document.createElement('div');
-                    cell.classList.add('cell', (renderR + renderC) % 2 === 0 ? 'light' : 'dark');
-                    cell.dataset.row = renderR;
-                    cell.dataset.col = renderC;
+                    cell.classList.add('cell', (r + c) % 2 === 0 ? 'light' : 'dark');
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
 
-                    if (iceLayout[renderR][renderC]) cell.classList.add('slippery');
+                    if (iceLayout[r][c]) cell.classList.add('slippery');
 
                     cell.addEventListener('dragover', onDragOver);
                     cell.addEventListener('drop', onDrop);
                     cell.addEventListener('mousedown', onSquareMouseDown);
                     cell.addEventListener('mouseup', onSquareMouseUp);
 
-                    const pieceType = board[renderR][renderC];
+                    const pieceType = board[r][c];
                     if (pieceType) {
                         const pieceDiv = document.createElement('div');
                         pieceDiv.classList.add('piece');
@@ -418,14 +632,14 @@
                         const isWhite = pieceType === pieceType.toUpperCase();
                         pieceDiv.classList.add(isWhite ? 'piece-w' : 'piece-b');
                         
-                        if (itemSlippedState[renderR][renderC] !== null) pieceDiv.classList.add('slipped-piece');
+                        if (itemSlippedState[r][c] !== null) pieceDiv.classList.add('slipped-piece');
                         
                         const basicTurnCheck = (turn === 'w' && isWhite) || (turn === 'b' && !isWhite);
                         const matchIdentityCheck = myPlayerColor ? ((myPlayerColor === 'w' && isWhite) || (myPlayerColor === 'b' && !isWhite)) : false;
 
-                        if (!gameOver && !isReplaying && !isAnimating && basicTurnCheck && matchIdentityCheck && itemSlippedState[renderR][renderC] === null) {
+                        if (!gameOver && !isReplaying && !isAnimating && basicTurnCheck && matchIdentityCheck && itemSlippedState[r][c] === null) {
                             pieceDiv.setAttribute('draggable', 'true');
-                            pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, renderR, renderC));
+                            pieceDiv.addEventListener('dragstart', (e) => onDragStart(e, r, c));
                         }
                         
                         cell.appendChild(pieceDiv);
@@ -436,13 +650,14 @@
         }
 
         levelSlider.addEventListener('input', (e) => {
-            if (myPlayerColor) {
-                levelSlider.value = currentLevel; // Lock slider mid-game
+            if (myPlayerColor || isSearching) {
+                levelSlider.value = currentLevel; 
                 return;
             }
             currentLevel = parseInt(e.target.value);
             levelValDisplay.textContent = currentLevel;
             levelDescDisplay.textContent = levelDescriptions[currentLevel];
+            randomMatchBtn.textContent = `Match with Stranger (Level ${currentLevel})`;
             initializeGame();
         });
 
@@ -583,18 +798,30 @@
                 let deltaX = toRect.left - fromRect.left;
                 let deltaY = toRect.top - fromRect.top;
 
+                if (myPlayerColor === 'b') {
+                    deltaX = -deltaX; deltaY = -deltaY;
+                }
+
                 movingPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
                 
                 let targetPieceElem = toCell.querySelector('.piece');
                 if (move.type === 'swap' && targetPieceElem) {
                     targetPieceElem.style.transition = "transform 0.28s cubic-bezier(0.25, 1, 0.5, 1)";
-                    targetPieceElem.style.transform = `translate(${-deltaX}px, ${-deltaY}px)`;
+                    if (myPlayerColor === 'b') {
+                        targetPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
+                    } else {
+                        targetPieceElem.style.transform = `translate(${-deltaX}px, ${-deltaY}px)`;
+                    }
                 } else if (targetPieceElem) {
                     targetPieceElem.style.transition = "opacity 0.2s ease";
                     targetPieceElem.style.opacity = "0";
                 }
 
-                movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                if (myPlayerColor === 'b') {
+                    movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px) rotate(180deg)`;
+                } else {
+                    movingPieceElem.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+                }
 
                 movingPieceElem.addEventListener('transitionend', function handler() {
                     movingPieceElem.removeEventListener('transitionend', handler);
@@ -643,9 +870,7 @@
             const rookDirs = [[1,0], [-1,0], [0,1], [0,-1]];
             const bishopDirs = [[1,1], [1,-1], [-1,1], [-1,-1]];
             
-            // Standard horse (Knight) offsets
-            const normalKnightOffsets = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
-            let knightOffsets = [...normalKnightOffsets];
+            let knightOffsets = [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]];
 
             const lvl2 = (currentLevel === 2 || currentLevel === 10);
             const lvl3 = (currentLevel === 3 || currentLevel === 10);
@@ -654,8 +879,7 @@
             const lvl7 = (currentLevel === 7 || currentLevel === 10);
             const lvl8 = (currentLevel === 8 || currentLevel === 10);
 
-            // Level 8 only extends jumps for native Horses/Knights ('n')
-            if (lvl8 && type === 'n') {
+            if (lvl8) {
                 knightOffsets = knightOffsets.concat([[4,2],[4,-2],[-4,2],[-4,-2],[2,4],[2,-4],[-2,4],[-2,-4]]);
             }
 
@@ -695,8 +919,7 @@
                 case 'r':
                     processSlidingMoves(r, c, rookDirs, piece, currentBoard, moves);
                     if (lvl4) {
-                        // Rooks move strictly like standard horses
-                        normalKnightOffsets.forEach(([dr, dc]) => {
+                        knightOffsets.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
                                 if (!target || isEnemy(piece, target)) {
@@ -715,8 +938,7 @@
                 case 'q':
                     processSlidingMoves(r, c, [...rookDirs, ...bishopDirs], piece, currentBoard, moves);
                     if (lvl3) {
-                        // Queens move strictly like standard horses
-                        normalKnightOffsets.forEach(([dr, dc]) => {
+                        knightOffsets.forEach(([dr, dc]) => {
                             if (isOnBoard(r + dr, c + dc)) {
                                 const target = currentBoard[r + dr][c + dc];
                                 if (!target || isEnemy(piece, target)) {
@@ -760,7 +982,7 @@
                     break;
 
                 case 'g':
-                    // Guardian Logic Adjustment: Guardians can now capture enemy units
+                    // Guardian Logic: Look for any matching friendly piece on the board
                     for (let tr = 0; tr < boardSize; tr++) {
                         for (let tc = 0; tc < boardSize; tc++) {
                             const targetPiece = currentBoard[tr][tc];
@@ -769,12 +991,9 @@
                                 const frontOffset = targetIsWhite ? -1 : 1; 
                                 const frontR = tr + frontOffset;
                                 
-                                if (isOnBoard(frontR, tc)) {
-                                    const cellOccupant = currentBoard[frontR][tc];
-                                    if (!cellOccupant || isEnemy(piece, cellOccupant)) {
-                                        if (!moves.some(m => m.toR === frontR && m.toC === tc)) {
-                                            moves.push({ fromR: r, fromC: c, toR: frontR, toC: tc, type: 'normal' });
-                                        }
+                                if (isOnBoard(frontR, tc) && !currentBoard[frontR][tc]) {
+                                    if (!moves.some(m => m.toR === frontR && m.toC === tc)) {
+                                        moves.push({ fromR: r, fromC: c, toR: frontR, toC: tc, type: 'normal' });
                                     }
                                 }
                             }
@@ -929,9 +1148,7 @@
         btnNext.addEventListener('click', () => { if (replayIndex < gameHistory.length - 1) { replayIndex++; updateReplayView(); } });
         btnLast.addEventListener('click', () => { replayIndex = gameHistory.length - 1; updateReplayView(); });
 
-        // Build default template before network setup
         initializeGame();
-        initNetwork();
     </script>
 </body>
 </html>
